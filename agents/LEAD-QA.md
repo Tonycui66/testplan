@@ -24,6 +24,7 @@
 ## 3. 输入
 
 - `../plan.md`
+- `../qa-acceptance-matrix.md`
 - 各 Agent 返回的测试设计文档
 - 各 Agent 标记的 `handoff` 和 `gap`
 
@@ -33,6 +34,7 @@
 - Agent 任务状态表
 - 风险与缺口清单
 - Phase 0-4 验收结论
+- Phase 主责、产出和退出条件核对结果
 - 边界裁决记录
 
 ## 5. 工作流程

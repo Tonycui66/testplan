@@ -330,6 +330,7 @@ Phase 验收汇总：
 | 现有文档 | 本规范作用 |
 | --- | --- |
 | `qa-agent-tasks.md` | 提供团队总览和职责边界 |
+| `qa-acceptance-matrix.md` | 提供 Phase 0-4 验收和退出条件 |
 | `agents/LEAD-QA.md` | 定义队长任务 |
 | `agents/AGT-CODE-REVIEW.md` | 定义评审规则 |
 | `agents/AGT-BACKEND-UNIT.md` 等 | 定义专业测试输出 |
