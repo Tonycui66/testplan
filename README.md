@@ -41,6 +41,10 @@
 | `agents/AGT-INFRA-GATE.md` | 基础设施与质量门禁 Agent |
 | `agents/DEV-AUTHOR.md` | 模块作者 Agent 接口 |
 | `artifacts/` | 统一结构化工件区，包含任务、评审、QA 设计、作者修复和阶段状态 |
+| `backend/` | FastAPI、SQLAlchemy、Alembic 后端骨架 |
+| `frontend/` | Vue3、Vite、Naive UI 前端骨架 |
+| `docker-compose.yml` | 本地一键启动编排 |
+| `docker/` | Nginx 反向代理配置 |
 
 ## 3. 文档阅读顺序
 
@@ -165,6 +169,19 @@ AGT-CODE-REVIEW
 ├── qa-agent-tasks.md
 ├── qa-acceptance-matrix.md
 ├── multica-team-spec.md
+├── docker-compose.yml
+├── backend/
+│   ├── app/
+│   ├── alembic/
+│   ├── tests/
+│   ├── scripts/
+│   └── Dockerfile
+├── frontend/
+│   ├── src/
+│   └── Dockerfile
+├── docker/
+│   └── nginx/
+│       └── default.conf
 ├── agents/
     ├── LEAD-QA.md
     ├── AGT-CODE-REVIEW.md
