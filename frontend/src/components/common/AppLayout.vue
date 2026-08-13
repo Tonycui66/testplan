@@ -9,6 +9,7 @@ import { RouterLink, RouterView } from 'vue-router'
     </header>
     <aside class="app-sidebar">
       <RouterLink to="/dashboard">Dashboard</RouterLink>
+      <RouterLink to="/projects">项目</RouterLink>
     </aside>
     <main class="app-content">
       <RouterView />
