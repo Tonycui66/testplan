@@ -3,6 +3,7 @@
 > 输入文件：`./plan.md`  
 > 当前阶段：测试设计与验收，不执行产品代码或测试代码  
 > 运行规范：`./multica-team-spec.md`  
+> 验收矩阵：`./qa-acceptance-matrix.md`  
 > 更新时间：2026-08-13
 
 ## 1. 使用约定
@@ -61,6 +62,7 @@ QA 测试 Agent 当前只输出测试范围、用例清单、风险、夹具设�
 | --- | --- |
 | [agents/DEV-AUTHOR.md](agents/DEV-AUTHOR.md) | 定义对应模块作者 Agent 的修改和验证协议 |
 | [multica-team-spec.md](multica-team-spec.md) | 定义状态机、消息、工件、权限、并发和升级规则 |
+| [qa-acceptance-matrix.md](qa-acceptance-matrix.md) | 定义 Phase 0-4 主责、产出、退出条件和阻塞升级 |
 
 ## 4. LEAD-QA 队长任务
 
@@ -497,6 +499,7 @@ REVIEW -> APPROVED | CHANGES_REQUESTED
 - [ ] 代码评审闭环覆盖 `REVIEW -> AUTHOR_FIX -> VERIFY -> RE-REVIEW`。
 - [ ] 作者 Agent 验证记录和复审结果可追踪。
 - [ ] `multica-team-spec.md` 已定义状态机、消息、工件、权限和升级规则。
+- [ ] `qa-acceptance-matrix.md` 已覆盖每个 Phase 的主责、产出、退出条件和阻塞升级。
 - [ ] `LEAD-QA` 可依据本文件直接派发和汇总任务。
 
 ## 14. 当前假设

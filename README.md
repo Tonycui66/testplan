@@ -30,6 +30,7 @@
 | `README.md` | 本说明文档 |
 | `plan.md` | 开源 DevOps 一体化平台完整技术规划 |
 | `qa-agent-tasks.md` | QA 多 Agent 团队总入口 |
+| `qa-acceptance-matrix.md` | Phase 0-4 QA 验收矩阵 |
 | `multica-team-spec.md` | multica 团队运行规范 |
 | `agents/LEAD-QA.md` | 队长 Agent |
 | `agents/AGT-CODE-REVIEW.md` | 代码评审 Agent |
@@ -46,8 +47,9 @@
 
 1. `plan.md`：理解产品范围、技术约束、模块和阶段计划。
 2. `qa-agent-tasks.md`：理解测试团队如何拆解和协作。
-3. `multica-team-spec.md`：理解 Agent 在运行时的状态、消息、工件和权限。
-4. `agents/`：查看每个 Agent 的具体职责和边界。
+3. `qa-acceptance-matrix.md`：理解每个 Phase 的验收和退出条件。
+4. `multica-team-spec.md`：理解 Agent 在运行时的状态、消息、工件和权限。
+5. `agents/`：查看每个 Agent 的具体职责和边界。
 
 ## 4. Agent 团队总览
 
@@ -159,6 +161,7 @@ AGT-CODE-REVIEW
 ├── README.md
 ├── plan.md
 ├── qa-agent-tasks.md
+├── qa-acceptance-matrix.md
 ├── multica-team-spec.md
 └── agents/
     ├── LEAD-QA.md
