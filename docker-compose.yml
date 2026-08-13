@@ -32,7 +32,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-devops}:${POSTGRES_PASSWORD:-devops123}@postgres:5432/${POSTGRES_DB:-devops_platform}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -63,14 +63,19 @@ services:
       - postgres
       - redis
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+
   nginx:
     image: nginx:alpine
     ports:
       - "80:80"
     volumes:
       - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./frontend/dist:/usr/share/nginx/html:ro
     depends_on:
+      - frontend
       - api
 
 volumes:

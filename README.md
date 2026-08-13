@@ -45,6 +45,7 @@
 | `frontend/` | Vue3、Vite、Naive UI 前端骨架 |
 | `docker-compose.yml` | 本地一键启动编排 |
 | `docker/` | Nginx 反向代理配置 |
+| `docs/phase1-tech-debt.md` | Phase 1 技术债登记 |
 
 ## 3. 文档阅读顺序
 
@@ -182,6 +183,8 @@ AGT-CODE-REVIEW
 ├── docker/
 │   └── nginx/
 │       └── default.conf
+├── docs/
+│   └── phase1-tech-debt.md
 ├── agents/
     ├── LEAD-QA.md
     ├── AGT-CODE-REVIEW.md
