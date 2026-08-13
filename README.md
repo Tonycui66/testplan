@@ -40,6 +40,12 @@
 | `agents/AGT-E2E-RELEASE.md` | 端到端与发布验收 Agent |
 | `agents/AGT-INFRA-GATE.md` | 基础设施与质量门禁 Agent |
 | `agents/DEV-AUTHOR.md` | 模块作者 Agent 接口 |
+| `artifacts/` | 统一结构化工件区，包含任务、评审、QA 设计、作者修复和阶段状态 |
+| `backend/` | FastAPI、SQLAlchemy、Alembic 后端骨架 |
+| `frontend/` | Vue3、Vite、Naive UI 前端骨架 |
+| `docker-compose.yml` | 本地一键启动编排 |
+| `docker/` | Nginx 反向代理配置 |
+| `docs/phase1-tech-debt.md` | Phase 1 技术债登记 |
 
 ## 3. 文档阅读顺序
 
@@ -50,6 +56,7 @@
 3. `qa-acceptance-matrix.md`：理解每个 Phase 的验收和退出条件。
 4. `multica-team-spec.md`：理解 Agent 在运行时的状态、消息、工件和权限。
 5. `agents/`：查看每个 Agent 的具体职责和边界。
+6. `artifacts/`：查看结构化工件的目录约束和当前阶段状态。
 
 ## 4. Agent 团队总览
 
@@ -163,7 +170,22 @@ AGT-CODE-REVIEW
 ├── qa-agent-tasks.md
 ├── qa-acceptance-matrix.md
 ├── multica-team-spec.md
-└── agents/
+├── docker-compose.yml
+├── backend/
+│   ├── app/
+│   ├── alembic/
+│   ├── tests/
+│   ├── scripts/
+│   └── Dockerfile
+├── frontend/
+│   ├── src/
+│   └── Dockerfile
+├── docker/
+│   └── nginx/
+│       └── default.conf
+├── docs/
+│   └── phase1-tech-debt.md
+├── agents/
     ├── LEAD-QA.md
     ├── AGT-CODE-REVIEW.md
     ├── AGT-BACKEND-UNIT.md
@@ -172,6 +194,13 @@ AGT-CODE-REVIEW
     ├── AGT-E2E-RELEASE.md
     ├── AGT-INFRA-GATE.md
     └── DEV-AUTHOR.md
+└── artifacts/
+    ├── tasks/
+    ├── reviews/
+    ├── qa/
+    ├── author/
+    └── status/
+        └── phase-status.json
 ```
 
 ## 10. 贡献方式
