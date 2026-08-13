@@ -1,4 +1,5 @@
 import asyncio
+import os
 from uuid import uuid4
 
 from sqlalchemy import text
@@ -8,6 +9,13 @@ from app.dependencies import get_database_engine
 
 
 async def seed() -> None:
+    admin_email = os.getenv("SEED_ADMIN_EMAIL")
+    admin_password = os.getenv("SEED_ADMIN_PASSWORD")
+    if not admin_email or not admin_password:
+        print("Skipping seed: SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD are required")
+        return
+
+    admin_name = os.getenv("SEED_ADMIN_NAME", "Admin")
     engine = get_database_engine()
     async with engine.begin() as conn:
         role_ids = {}
@@ -29,9 +37,9 @@ async def seed() -> None:
             ),
             {
                 "id": uuid4(),
-                "email": "admin@example.com",
-                "password_hash": hash_password("Admin123!"),
-                "name": "Admin",
+                "email": admin_email,
+                "password_hash": hash_password(admin_password),
+                "name": admin_name,
             },
         )
         admin_id = result.scalar_one()

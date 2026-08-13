@@ -58,3 +58,6 @@ class TeamResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+class LogoutRequest(BaseModel):
+    refresh_token: Optional[str] = None

@@ -1,20 +1,22 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { NButton, NForm, NFormItem, NInput } from 'naive-ui'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
-const email = ref('admin@example.com')
-const password = ref('Admin123!')
+const route = useRoute()
+const email = ref('')
+const password = ref('')
 const loading = ref(false)
 
 async function submit() {
   loading.value = true
   try {
     await auth.login(email.value, password.value)
-    await router.push('/dashboard')
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
+    await router.push(redirect)
   } finally {
     loading.value = false
   }
@@ -31,7 +33,7 @@ async function submit() {
       <NFormItem label="密码">
         <NInput v-model:value="password" type="password" placeholder="Password" />
       </NFormItem>
-      <NButton type="primary" block :loading="loading" @click="submit">登录</NButton>
+      <NButton type="primary" block :loading="loading" @click="submit"> 登录 </NButton>
     </NForm>
   </main>
 </template>

@@ -92,3 +92,32 @@ class BoardColumnCreate(BaseModel):
 class BoardColumnUpdate(BaseModel):
     name: Optional[str] = None
     order: Optional[int] = None
+
+class RequirementUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    assignee_id: Optional[UUID] = None
+    iteration_id: Optional[UUID] = None
+
+
+class TaskUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    assignee_id: Optional[UUID] = None
+    iteration_id: Optional[UUID] = None
+    parent_id: Optional[UUID] = None
+
+
+class BugUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    steps_to_reproduce: Optional[str] = None
+    severity: Optional[str] = None
+    priority: Optional[str] = None
+    status: Optional[str] = None
+    assignee_id: Optional[UUID] = None
+    iteration_id: Optional[UUID] = None
