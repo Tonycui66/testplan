@@ -1,3 +1,4 @@
+from __future__ import annotations
 from datetime import timedelta
 from typing import Any, Optional
 from uuid import UUID, uuid4
@@ -6,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.redis_client import get_redis
 from app.core.security import create_token, decode_token, hash_password, verify_password
@@ -32,11 +34,12 @@ def user_to_response(user: User) -> UserResponse:
 
 
 async def issue_tokens(user: User) -> TokenResponse:
-    access_token = create_token(str(user.id), timedelta(minutes=30), token_type="access")
+    settings = get_settings()
+    access_token = create_token(str(user.id), timedelta(minutes=settings.access_token_expire_minutes), token_type="access")
     jti = str(uuid4())
-    refresh_token = create_token(f"refresh:{user.id}", timedelta(days=7), token_type="refresh", jti=jti)
+    refresh_token = create_token(f"refresh:{user.id}", timedelta(days=settings.refresh_token_expire_days), token_type="refresh", jti=jti)
     redis = get_redis()
-    await redis.set(f"refresh:{jti}", str(user.id), ex=7 * 24 * 60 * 60)
+    await redis.set(f"refresh:{jti}", str(user.id), ex=settings.refresh_token_expire_days * 24 * 60 * 60)
     return TokenResponse(access_token=access_token, refresh_token=refresh_token, user=user_to_response(user))
 
 
@@ -121,7 +124,7 @@ async def list_teams(
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     offset = (max(page, 1) - 1) * min(max(page_size, 1), 100)
     stmt = (
         select(Team)
@@ -153,7 +156,7 @@ async def get_owned_team(team_id: UUID, user: User, db: AsyncSession) -> Team:
 
 
 @router.get("/teams/{team_id}", response_model=dict)
-async def get_team(team_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
+async def get_team(team_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
     team = await get_owned_team(team_id, user, db)
     members = (await db.scalars(select(TeamMember).where(TeamMember.team_id == team_id))).all()
     return {
@@ -211,7 +214,7 @@ async def list_admin_users(
     search: str = "",
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_superadmin),
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     stmt = select(User)
     if search:
         stmt = stmt.where(or_(User.email.ilike(f"%{search}%"), User.name.ilike(f"%{search}%")))

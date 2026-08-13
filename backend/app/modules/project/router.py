@@ -1,4 +1,5 @@
-from typing import Any
+from __future__ import annotations
+from typing import Any, Dict
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -70,7 +71,7 @@ async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_
 
 
 @router.get("", response_model=dict)
-async def list_projects(page: int = 1, search: str = "", db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
+async def list_projects(page: int = 1, search: str = "", db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
     stmt = (
         select(pm.Project)
         .join(pm.ProjectMember, pm.ProjectMember.project_id == pm.Project.id)
@@ -117,7 +118,7 @@ async def delete_project(project_id: UUID, db: AsyncSession = Depends(get_db), u
 
 
 @router.get("/{project_id}/members", response_model=dict)
-async def list_members(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def list_members(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     rows = (await db.scalars(select(pm.ProjectMember).where(pm.ProjectMember.project_id == project_id))).all()
     return {"items": [MemberResponse(user_id=row.user_id, role=row.role).model_dump() for row in rows]}
 
@@ -156,7 +157,7 @@ async def remove_member(project_id: UUID, user_id: UUID, db: AsyncSession = Depe
 
 
 @router.post("/{project_id}/iterations", status_code=status.HTTP_201_CREATED)
-async def create_iteration(project_id: UUID, payload: IterationCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def create_iteration(project_id: UUID, payload: IterationCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     iteration = pm.Iteration(project_id=project_id, **payload.model_dump())
     db.add(iteration)
     await db.commit()
@@ -165,15 +166,15 @@ async def create_iteration(project_id: UUID, payload: IterationCreate, db: Async
 
 
 @router.get("/{project_id}/iterations", response_model=dict)
-async def list_iterations(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def list_iterations(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     rows = (await db.scalars(select(pm.Iteration).where(pm.Iteration.project_id == project_id, pm.Iteration.deleted_at.is_(None)))).all()
     return {"items": [{"id": r.id, "name": r.name, "status": r.status} for r in rows]}
 
 
 @router.patch("/{project_id}/iterations/{iteration_id}")
-async def update_iteration(project_id: UUID, iteration_id: UUID, payload: IterationUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
-    iteration = await db.get(pm.Iteration, iteration_id)
-    if iteration is None or iteration.project_id != project_id:
+async def update_iteration(project_id: UUID, iteration_id: UUID, payload: IterationUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    iteration = await db.scalar(select(pm.Iteration).where(pm.Iteration.id == iteration_id, pm.Iteration.project_id == project_id, pm.Iteration.deleted_at.is_(None)))
+    if iteration is None:
         raise NotFoundError("Iteration not found")
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(iteration, key, value)
@@ -183,15 +184,15 @@ async def update_iteration(project_id: UUID, iteration_id: UUID, payload: Iterat
 
 @router.delete("/{project_id}/iterations/{iteration_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_iteration(project_id: UUID, iteration_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> None:
-    iteration = await db.get(pm.Iteration, iteration_id)
-    if iteration is None or iteration.project_id != project_id:
+    iteration = await db.scalar(select(pm.Iteration).where(pm.Iteration.id == iteration_id, pm.Iteration.project_id == project_id, pm.Iteration.deleted_at.is_(None)))
+    if iteration is None:
         raise NotFoundError("Iteration not found")
     iteration.deleted_at = func.now()
     await db.commit()
 
 
 @router.post("/{project_id}/requirements", status_code=status.HTTP_201_CREATED)
-async def create_requirement(project_id: UUID, payload: RequirementCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def create_requirement(project_id: UUID, payload: RequirementCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     requirement = pm.Requirement(project_id=project_id, **payload.model_dump())
     db.add(requirement)
     await db.commit()
@@ -200,13 +201,13 @@ async def create_requirement(project_id: UUID, payload: RequirementCreate, db: A
 
 
 @router.get("/{project_id}/requirements", response_model=dict)
-async def list_requirements(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def list_requirements(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     rows = (await db.scalars(select(pm.Requirement).where(pm.Requirement.project_id == project_id, pm.Requirement.deleted_at.is_(None)))).all()
     return {"items": [{"id": r.id, "title": r.title, "status": r.status, "priority": r.priority} for r in rows]}
 
 
 @router.get("/{project_id}/requirements/{requirement_id}")
-async def get_requirement(project_id: UUID, requirement_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def get_requirement(project_id: UUID, requirement_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     row = await db.scalar(select(pm.Requirement).where(pm.Requirement.id == requirement_id, pm.Requirement.deleted_at.is_(None)))
     if row is None or row.project_id != project_id:
         raise NotFoundError("Requirement not found")
@@ -214,7 +215,7 @@ async def get_requirement(project_id: UUID, requirement_id: UUID, db: AsyncSessi
 
 
 @router.patch("/{project_id}/requirements/{requirement_id}")
-async def update_requirement(project_id: UUID, requirement_id: UUID, payload: RequirementUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def update_requirement(project_id: UUID, requirement_id: UUID, payload: RequirementUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     row = await db.scalar(select(pm.Requirement).where(pm.Requirement.id == requirement_id, pm.Requirement.deleted_at.is_(None)))
     if row is None or row.project_id != project_id:
         raise NotFoundError("Requirement not found")
@@ -234,7 +235,7 @@ async def delete_requirement(project_id: UUID, requirement_id: UUID, db: AsyncSe
 
 
 @router.post("/{project_id}/tasks", status_code=status.HTTP_201_CREATED)
-async def create_task(project_id: UUID, payload: TaskCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def create_task(project_id: UUID, payload: TaskCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     task = pm.Task(project_id=project_id, **payload.model_dump(exclude={"requirement_id"}))
     db.add(task)
     await db.flush()
@@ -245,13 +246,13 @@ async def create_task(project_id: UUID, payload: TaskCreate, db: AsyncSession = 
 
 
 @router.get("/{project_id}/tasks", response_model=dict)
-async def list_tasks(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def list_tasks(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     rows = (await db.scalars(select(pm.Task).where(pm.Task.project_id == project_id, pm.Task.deleted_at.is_(None)))).all()
     return {"items": [{"id": r.id, "title": r.title, "status": r.status, "priority": r.priority} for r in rows]}
 
 
 @router.get("/{project_id}/tasks/{task_id}")
-async def get_task(project_id: UUID, task_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def get_task(project_id: UUID, task_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     row = await db.scalar(select(pm.Task).where(pm.Task.id == task_id, pm.Task.deleted_at.is_(None)))
     if row is None or row.project_id != project_id:
         raise NotFoundError("Task not found")
@@ -259,7 +260,7 @@ async def get_task(project_id: UUID, task_id: UUID, db: AsyncSession = Depends(g
 
 
 @router.patch("/{project_id}/tasks/{task_id}")
-async def update_task(project_id: UUID, task_id: UUID, payload: TaskUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def update_task(project_id: UUID, task_id: UUID, payload: TaskUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     row = await db.scalar(select(pm.Task).where(pm.Task.id == task_id, pm.Task.deleted_at.is_(None)))
     if row is None or row.project_id != project_id:
         raise NotFoundError("Task not found")
@@ -279,7 +280,7 @@ async def delete_task(project_id: UUID, task_id: UUID, db: AsyncSession = Depend
 
 
 @router.post("/{project_id}/bugs", status_code=status.HTTP_201_CREATED)
-async def create_bug(project_id: UUID, payload: BugCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def create_bug(project_id: UUID, payload: BugCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     bug = pm.Bug(project_id=project_id, **payload.model_dump())
     db.add(bug)
     await db.commit()
@@ -287,13 +288,13 @@ async def create_bug(project_id: UUID, payload: BugCreate, db: AsyncSession = De
 
 
 @router.get("/{project_id}/bugs", response_model=dict)
-async def list_bugs(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def list_bugs(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     rows = (await db.scalars(select(pm.Bug).where(pm.Bug.project_id == project_id, pm.Bug.deleted_at.is_(None)))).all()
     return {"items": [{"id": r.id, "title": r.title, "severity": r.severity, "status": r.status} for r in rows]}
 
 
 @router.get("/{project_id}/bugs/{bug_id}")
-async def get_bug(project_id: UUID, bug_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def get_bug(project_id: UUID, bug_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     row = await db.scalar(select(pm.Bug).where(pm.Bug.id == bug_id, pm.Bug.deleted_at.is_(None)))
     if row is None or row.project_id != project_id:
         raise NotFoundError("Bug not found")
@@ -301,7 +302,7 @@ async def get_bug(project_id: UUID, bug_id: UUID, db: AsyncSession = Depends(get
 
 
 @router.patch("/{project_id}/bugs/{bug_id}")
-async def update_bug(project_id: UUID, bug_id: UUID, payload: BugUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def update_bug(project_id: UUID, bug_id: UUID, payload: BugUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     row = await db.scalar(select(pm.Bug).where(pm.Bug.id == bug_id, pm.Bug.deleted_at.is_(None)))
     if row is None or row.project_id != project_id:
         raise NotFoundError("Bug not found")
@@ -321,7 +322,7 @@ async def delete_bug(project_id: UUID, bug_id: UUID, db: AsyncSession = Depends(
 
 
 @router.get("/{project_id}/board", response_model=dict)
-async def get_board(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def get_board(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     board = await db.scalar(select(pm.Board).where(pm.Board.project_id == project_id))
     if board is None:
         raise NotFoundError("Board not found")
@@ -334,7 +335,7 @@ async def get_board(project_id: UUID, db: AsyncSession = Depends(get_db), _: Use
 
 
 @router.post("/{project_id}/board/columns", status_code=status.HTTP_201_CREATED)
-async def create_board_column(project_id: UUID, payload: BoardColumnCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def create_board_column(project_id: UUID, payload: BoardColumnCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     board = await db.scalar(select(pm.Board).where(pm.Board.project_id == project_id))
     if board is None:
         raise NotFoundError("Board not found")
@@ -345,7 +346,7 @@ async def create_board_column(project_id: UUID, payload: BoardColumnCreate, db: 
 
 
 @router.patch("/{project_id}/board/columns/{column_id}")
-async def update_board_column(project_id: UUID, column_id: UUID, payload: BoardColumnUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> dict[str, Any]:
+async def update_board_column(project_id: UUID, column_id: UUID, payload: BoardColumnUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     column = await db.get(pm.BoardColumn, column_id)
     if column is None:
         raise NotFoundError("Board column not found")
