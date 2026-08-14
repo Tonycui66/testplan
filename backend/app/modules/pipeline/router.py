@@ -217,6 +217,7 @@ async def mark_run_cancelled(db: AsyncSession, run_id: UUID) -> None:
         if job_run.status not in {"success", "failed", "cancelled", "skipped"}:
             job_run.status = "cancelled"
             job_run.finished_at = datetime.now(timezone.utc)
+    await db.commit()
 
 @ws_router.websocket("/pipelines/{pipeline_id}/runs/{run_id}/logs")
 async def pipeline_logs(websocket: WebSocket, pipeline_id: UUID, run_id: UUID) -> None:

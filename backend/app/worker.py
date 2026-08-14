@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.logging_config import configure_logging
@@ -16,8 +16,13 @@ from app.modules.pipeline import models as pm
 TERMINAL = {"success", "failed", "cancelled", "skipped"}
 
 
-async def publish_log(redis, run_id: str, stream: str, content: str) -> None:
-    line = json.dumps({"stream": stream, "content": content, "timestamp": datetime.now(timezone.utc).isoformat()})
+async def publish_log(redis, run_id: str, stream: str, content: str, db=None, job_run_id=None) -> None:
+    timestamp = datetime.now(timezone.utc)
+    if db is not None and job_run_id is not None:
+        next_line = await db.scalar(select(func.coalesce(func.max(pm.JobLog.line_number), 0) + 1).where(pm.JobLog.job_run_id == job_run_id)) or 1
+        db.add(pm.JobLog(job_run_id=job_run_id, line_number=next_line, content=content, stream=stream, timestamp=timestamp))
+        await db.commit()
+    line = json.dumps({"stream": stream, "content": content, "timestamp": timestamp.isoformat()})
     await redis.publish(f"logs:{run_id}", line)
 
 
@@ -92,14 +97,14 @@ async def process_run(payload: Dict[str, Any]) -> None:
                 job_run.status = "running"
                 job_run.started_at = datetime.now(timezone.utc)
                 await db.commit()
-                await publish_log(redis, str(run.id), "stdout", f"{job_run.name}: started")
+                await publish_log(redis, str(run.id), "stdout", f"{job_run.name}: started", db, job_run.id)
                 try:
                     await asyncio.sleep(0.1)
                     job_run.status = "success"
                     job_run.exit_code = 0
                     job_run.finished_at = datetime.now(timezone.utc)
                     await db.commit()
-                    await publish_log(redis, str(run.id), "stdout", f"{job_run.name}: completed")
+                    await publish_log(redis, str(run.id), "stdout", f"{job_run.name}: completed", db, job_run.id)
                 except Exception:
                     job_run.status = "failed"
                     job_run.exit_code = 1
@@ -107,7 +112,7 @@ async def process_run(payload: Dict[str, Any]) -> None:
                     stage_failed = True
                     failed = True
                     await db.commit()
-                    await publish_log(redis, str(run.id), "stderr", f"{job_run.name}: failed")
+                    await publish_log(redis, str(run.id), "stderr", f"{job_run.name}: failed", db, job_run.id)
 
             stage_run.status = "failed" if stage_failed else "success"
             stage_run.finished_at = datetime.now(timezone.utc)

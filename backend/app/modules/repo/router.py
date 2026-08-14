@@ -8,6 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
@@ -92,6 +93,8 @@ async def receive_webhook(provider: str, payload: WebhookEventCreate, request: R
     connection = await db.get(rm.RepoConnection, connection_id)
     if connection is None or not connection.is_active or not connection.webhook_secret:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid webhook target")
+    if connection.provider != provider:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Provider mismatch")
     raw_body = await request.body()
     header_names = ["x-hub-signature-256", "x-gitlab-token", "x-signature"]
     signature = next((request.headers.get(name, "") for name in header_names if request.headers.get(name)), "")
@@ -104,17 +107,27 @@ async def receive_webhook(provider: str, payload: WebhookEventCreate, request: R
         if not hmac.compare_digest(expected, signature):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid webhook signature")
     dedupe_key = request.headers.get("x-github-delivery") or request.headers.get("x-gitlab-event-uuid") or request.headers.get("x-webhook-id") or hashlib.sha256(raw_body).hexdigest()
-    existing = await db.scalar(select(rm.WebhookEvent).where(rm.WebhookEvent.connection_id == connection.id, rm.WebhookEvent.dedupe_key == dedupe_key))
-    if existing is not None:
-        return {"id": existing.id, "event_type": existing.event_type, "processed": existing.processed, "queued": True, "duplicate": True}
-    event = rm.WebhookEvent(connection_id=connection.id, event_type=payload.event_type, payload=payload.payload, processed=False, dedupe_key=dedupe_key)
-    db.add(event)
+    insert_stmt = insert(rm.WebhookEvent).values(
+        connection_id=connection.id,
+        event_type=payload.event_type,
+        payload=payload.payload,
+        processed=False,
+        dedupe_key=dedupe_key,
+    ).on_conflict_do_nothing(index_elements=["connection_id", "dedupe_key"]).returning(rm.WebhookEvent.id)
+    event_id = await db.scalar(insert_stmt)
     await db.commit()
+    if event_id is None:
+        existing = await db.scalar(select(rm.WebhookEvent).where(rm.WebhookEvent.connection_id == connection.id, rm.WebhookEvent.dedupe_key == dedupe_key))
+        if existing is not None:
+            return {"id": existing.id, "event_type": existing.event_type, "processed": existing.processed, "queued": True, "duplicate": True}
+    event_id = event_id or existing.id
     queued = True
     try:
-        await get_redis().rpush("queue:webhook", json.dumps({"event_id": str(event.id), "connection_id": str(connection.id), "payload": payload.payload}))
+        await get_redis().rpush("queue:webhook", json.dumps({"event_id": str(event_id), "connection_id": str(connection.id), "payload": payload.payload}))
     except Exception as exc:
         queued = False
-        event.payload = {**event.payload, "enqueue_error": str(exc)}
-        await db.commit()
-    return {"id": event.id, "event_type": event.event_type, "processed": event.processed, "queued": queued}
+        event = await db.get(rm.WebhookEvent, event_id)
+        if event is not None:
+            event.payload = {**event.payload, "enqueue_error": str(exc)}
+            await db.commit()
+    return {"id": event_id, "event_type": payload.event_type, "processed": False, "queued": queued}
