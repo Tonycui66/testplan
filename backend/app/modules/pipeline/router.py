@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -22,6 +23,14 @@ from app.modules.user.models import User
 router = APIRouter(prefix="/api/v1/projects/{project_id}/pipelines", tags=["pipeline"], dependencies=[Depends(require_project_access)])
 ws_router = APIRouter(prefix="/api/v1/ws", tags=["pipeline-ws"])
 
+
+
+async def require_owner_or_admin(project_id: UUID, user: User, db: AsyncSession) -> None:
+    if user.is_superadmin:
+        return
+    member = await db.scalar(select(ProjectMember).where(ProjectMember.project_id == project_id, ProjectMember.user_id == user.id))
+    if member is None or member.role not in {"owner", "admin"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Owner permission required")
 
 async def get_pipeline(project_id: UUID, pipeline_id: UUID, db: AsyncSession) -> pm.Pipeline:
     pipeline = await db.scalar(select(pm.Pipeline).where(pm.Pipeline.id == pipeline_id, pm.Pipeline.project_id == project_id))
@@ -86,6 +95,20 @@ async def update_pipeline(project_id: UUID, pipeline_id: UUID, payload: Pipeline
         pipeline.description = payload.description
     if payload.is_enabled is not None:
         pipeline.is_enabled = payload.is_enabled
+    if payload.stages is not None:
+        old_stages = (await db.scalars(select(pm.PipelineStage).where(pm.PipelineStage.pipeline_id == pipeline.id))).all()
+        for old_stage in old_stages:
+            old_jobs = (await db.scalars(select(pm.PipelineJob).where(pm.PipelineJob.stage_id == old_stage.id))).all()
+            for old_job in old_jobs:
+                await db.delete(old_job)
+            await db.delete(old_stage)
+        await db.flush()
+        for stage_input in payload.stages:
+            stage = pm.PipelineStage(pipeline_id=pipeline.id, name=stage_input.name, order=stage_input.order, condition=stage_input.condition)
+            db.add(stage)
+            await db.flush()
+            for job_input in stage_input.jobs:
+                db.add(pm.PipelineJob(stage_id=stage.id, **job_input.model_dump()))
     await db.commit()
     await db.refresh(pipeline)
     return PipelineResponse.model_validate(pipeline)
@@ -101,6 +124,7 @@ async def delete_pipeline(project_id: UUID, pipeline_id: UUID, db: AsyncSession 
 
 @router.post("/{pipeline_id}/run", status_code=status.HTTP_201_CREATED)
 async def trigger_run(project_id: UUID, pipeline_id: UUID, payload: RunCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
+    await require_owner_or_admin(project_id, user, db)
     pipeline = await get_pipeline(project_id, pipeline_id, db)
     if not pipeline.is_enabled:
         raise ConflictError("Pipeline is disabled")
@@ -166,7 +190,8 @@ async def get_run(project_id: UUID, pipeline_id: UUID, run_id: UUID, db: AsyncSe
 
 
 @router.post("/{pipeline_id}/runs/{run_id}/cancel", response_model=dict)
-async def cancel_run(project_id: UUID, pipeline_id: UUID, run_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+async def cancel_run(project_id: UUID, pipeline_id: UUID, run_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
+    await require_owner_or_admin(project_id, user, db)
     pipeline = await get_pipeline(project_id, pipeline_id, db)
     run = await db.scalar(select(pm.PipelineRun).where(pm.PipelineRun.id == run_id, pm.PipelineRun.pipeline_id == pipeline.id))
     if run is None:
@@ -197,7 +222,8 @@ async def pipeline_logs(websocket: WebSocket, run_id: UUID) -> None:
             await websocket.close(code=1008)
             return
         member = await db.scalar(select(ProjectMember).where(ProjectMember.project_id == pipeline.project_id, ProjectMember.user_id == UUID(subject)))
-        if member is None:
+        current_user = await db.get(User, UUID(subject))
+        if member is None and (current_user is None or not current_user.is_superadmin):
             await websocket.close(code=1008)
             return
     await websocket.accept()
@@ -206,9 +232,15 @@ async def pipeline_logs(websocket: WebSocket, run_id: UUID) -> None:
     await pubsub.subscribe(f"logs:{run_id}")
     try:
         while True:
-            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.25)
             if message and message.get("type") == "message":
                 await websocket.send_text(message["data"])
+            try:
+                client_message = await asyncio.wait_for(websocket.receive_text(), timeout=0.25)
+                if client_message == "ping":
+                    await websocket.send_text("pong")
+            except asyncio.TimeoutError:
+                continue
     except WebSocketDisconnect:
         pass
     finally:

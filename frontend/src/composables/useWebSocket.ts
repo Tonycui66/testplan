@@ -7,12 +7,14 @@ export function useWebSocket(path: string) {
   let socket: globalThis.WebSocket | null = null
   let reconnectTimer: number | null = null
   let heartbeatTimer: number | null = null
+  let closedByCleanup = false
 
   function token() {
     return localStorage.getItem('access_token') ?? ''
   }
 
   function cleanup() {
+    closedByCleanup = true
     if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
     if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer)
     socket?.close()
@@ -31,7 +33,8 @@ export function useWebSocket(path: string) {
       heartbeatTimer = window.setInterval(() => socket?.send('ping'), 30000)
     }
     socket.onmessage = (event) => {
-      if (event.data !== 'pong') messages.value.push(event.data)
+      if (event.data === 'pong') return
+      messages.value.push(event.data)
     }
     socket.onerror = () => {
       error.value = 'WebSocket connection error'
@@ -39,7 +42,7 @@ export function useWebSocket(path: string) {
     socket.onclose = () => {
       connected.value = false
       if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer)
-      reconnectTimer = window.setTimeout(connect, 2000)
+      if (!closedByCleanup) reconnectTimer = window.setTimeout(connect, 2000)
     }
   }
 

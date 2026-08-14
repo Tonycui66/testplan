@@ -42,3 +42,10 @@ def test_repo_connection_response_does_not_expose_webhook_secret() -> None:
         created_at=datetime(2026, 8, 15),
     )
     assert "webhook_secret" not in response.model_dump()
+
+from app.modules.pipeline.schemas import PipelineUpdate
+
+
+def test_pipeline_update_accepts_stages() -> None:
+    payload = PipelineUpdate(stages=[StageInput(name="Cleanup", condition="on_failure", jobs=[])])
+    assert payload.stages[0].condition == "on_failure"

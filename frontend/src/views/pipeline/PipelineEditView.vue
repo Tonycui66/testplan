@@ -9,6 +9,7 @@ const projectId = String(route.params.id)
 const pipelineId = String(route.params.pid)
 const name = ref('')
 const description = ref('')
+const stagesJson = ref('[]')
 const loading = ref(false)
 
 async function load() {
@@ -18,6 +19,7 @@ async function load() {
     const detail = data.data
     name.value = detail.name
     description.value = detail.description ?? ''
+    stagesJson.value = JSON.stringify(detail.stages ?? [], null, 2)
   } finally {
     loading.value = false
   }
@@ -27,15 +29,18 @@ async function save() {
   loading.value = true
   try {
     if (pipelineId === 'new') {
+      const stages = JSON.parse(stagesJson.value || '[]')
       await createPipeline(projectId, {
         name: name.value,
         description: description.value,
-        stages: []
+        stages
       })
     } else {
+      const stages = JSON.parse(stagesJson.value || '[]')
       await updatePipeline(projectId, pipelineId, {
         name: name.value,
-        description: description.value
+        description: description.value,
+        stages
       })
     }
   } finally {
@@ -56,6 +61,9 @@ onMounted(() => {
     </NFormItem>
     <NFormItem label="描述">
       <NInput v-model:value="description" />
+    </NFormItem>
+    <NFormItem label="Stages/Jobs JSON">
+      <NInput v-model:value="stagesJson" type="textarea" :rows="10" />
     </NFormItem>
     <NButton type="primary" :loading="loading" @click="save">保存</NButton>
   </NForm>

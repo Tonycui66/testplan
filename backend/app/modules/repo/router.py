@@ -91,5 +91,11 @@ async def receive_webhook(provider: str, payload: WebhookEventCreate, request: R
     event = rm.WebhookEvent(connection_id=connection.id, event_type=payload.event_type, payload=payload.payload, processed=False)
     db.add(event)
     await db.commit()
-    await get_redis().rpush("queue:webhook", json.dumps({"event_id": str(event.id), "connection_id": str(connection.id), "payload": payload.payload}))
-    return {"id": event.id, "event_type": event.event_type, "processed": event.processed}
+    queued = True
+    try:
+        await get_redis().rpush("queue:webhook", json.dumps({"event_id": str(event.id), "connection_id": str(connection.id), "payload": payload.payload}))
+    except Exception as exc:
+        queued = False
+        event.payload = {**event.payload, "enqueue_error": str(exc)}
+        await db.commit()
+    return {"id": event.id, "event_type": event.event_type, "processed": event.processed, "queued": queued}

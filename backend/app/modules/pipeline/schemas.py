@@ -34,6 +34,7 @@ class PipelineUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     is_enabled: Optional[bool] = None
+    stages: Optional[List[StageInput]] = None
 
 
 class PipelineResponse(BaseModel):
