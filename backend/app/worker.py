@@ -18,11 +18,15 @@ TERMINAL = {"success", "failed", "cancelled", "skipped"}
 
 async def publish_log(redis, run_id: str, stream: str, content: str, db=None, job_run_id=None) -> None:
     timestamp = datetime.now(timezone.utc)
+    log_id = None
     if db is not None and job_run_id is not None:
         next_line = await db.scalar(select(func.coalesce(func.max(pm.JobLog.line_number), 0) + 1).where(pm.JobLog.job_run_id == job_run_id)) or 1
-        db.add(pm.JobLog(job_run_id=job_run_id, line_number=next_line, content=content, stream=stream, timestamp=timestamp))
+        log = pm.JobLog(job_run_id=job_run_id, line_number=next_line, content=content, stream=stream, timestamp=timestamp)
+        db.add(log)
         await db.commit()
-    line = json.dumps({"stream": stream, "content": content, "timestamp": timestamp.isoformat()})
+        await db.refresh(log)
+        log_id = log.id
+    line = json.dumps({"id": str(log_id) if log_id else None, "stream": stream, "content": content, "timestamp": timestamp.isoformat()})
     await redis.publish(f"logs:{run_id}", line)
 
 

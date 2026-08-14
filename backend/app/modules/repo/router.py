@@ -113,7 +113,7 @@ async def receive_webhook(provider: str, payload: WebhookEventCreate, request: R
         payload=payload.payload,
         processed=False,
         dedupe_key=dedupe_key,
-    ).on_conflict_do_nothing(index_elements=["connection_id", "dedupe_key"]).returning(rm.WebhookEvent.id)
+    ).on_conflict_do_nothing(index_elements=["connection_id", "dedupe_key"], index_where=rm.WebhookEvent.dedupe_key.isnot(None)).returning(rm.WebhookEvent.id)
     event_id = await db.scalar(insert_stmt)
     await db.commit()
     if event_id is None:

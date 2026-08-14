@@ -243,18 +243,25 @@ async def pipeline_logs(websocket: WebSocket, pipeline_id: UUID, run_id: UUID) -
             return
     await websocket.accept()
     redis = get_redis()
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(f"logs:{run_id}")
     async with session_factory() as db:
         history = (await db.scalars(
             select(pm.JobLog)
             .join(pm.JobRun, pm.JobLog.job_run_id == pm.JobRun.id)
             .join(pm.StageRun, pm.JobRun.stage_run_id == pm.StageRun.id)
+            .join(pm.PipelineJob, pm.PipelineJob.id == pm.JobRun.job_id)
             .where(pm.StageRun.run_id == run_id)
-            .order_by(pm.JobLog.line_number)
+            .order_by(pm.StageRun.order, pm.PipelineJob.order, pm.JobLog.line_number, pm.JobLog.timestamp, pm.JobLog.id)
         )).all()
         for log in history:
-            await websocket.send_text(json.dumps({"stream": log.stream, "content": log.content, "timestamp": log.timestamp.isoformat()}))
-    pubsub = redis.pubsub()
-    await pubsub.subscribe(f"logs:{run_id}")
+            await websocket.send_text(json.dumps({"id": str(log.id), "stream": log.stream, "content": log.content, "timestamp": log.timestamp.isoformat()}))
+    while True:
+        buffered = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0)
+        if buffered is None:
+            break
+        if buffered.get("type") == "message":
+            await websocket.send_text(buffered["data"])
     last_heartbeat = time.monotonic()
     last_client = time.monotonic()
     try:
