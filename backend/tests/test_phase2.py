@@ -56,3 +56,16 @@ from app.main import app
 def test_phase2_websocket_contract_path_exists() -> None:
     paths = {route.path for route in app.routes}
     assert "/api/v1/ws/pipelines/{pipeline_id}/runs/{run_id}/logs" in paths
+
+import json
+
+from app.modules.pipeline.router import log_message_id
+
+
+def test_log_message_id_parses_persisted_job_log_id() -> None:
+    log_id = uuid4()
+    assert log_message_id(json.dumps({"id": str(log_id), "content": "ok"})) == str(log_id)
+
+
+def test_log_message_id_handles_non_json() -> None:
+    assert log_message_id("not-json") is None

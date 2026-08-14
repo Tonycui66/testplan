@@ -219,6 +219,16 @@ async def mark_run_cancelled(db: AsyncSession, run_id: UUID) -> None:
             job_run.finished_at = datetime.now(timezone.utc)
     await db.commit()
 
+
+def log_message_id(data: str) -> Optional[str]:
+    try:
+        payload = json.loads(data)
+    except Exception:
+        return None
+    value = payload.get("id")
+    return str(value) if value else None
+
+
 @ws_router.websocket("/pipelines/{pipeline_id}/runs/{run_id}/logs")
 async def pipeline_logs(websocket: WebSocket, pipeline_id: UUID, run_id: UUID) -> None:
     token = websocket.query_params.get("token") or websocket.headers.get("authorization", "").removeprefix("Bearer ")
@@ -245,6 +255,7 @@ async def pipeline_logs(websocket: WebSocket, pipeline_id: UUID, run_id: UUID) -
     redis = get_redis()
     pubsub = redis.pubsub()
     await pubsub.subscribe(f"logs:{run_id}")
+    sent_log_ids: set[str] = set()
     async with session_factory() as db:
         history = (await db.scalars(
             select(pm.JobLog)
@@ -255,12 +266,19 @@ async def pipeline_logs(websocket: WebSocket, pipeline_id: UUID, run_id: UUID) -
             .order_by(pm.StageRun.order, pm.PipelineJob.order, pm.JobLog.line_number, pm.JobLog.timestamp, pm.JobLog.id)
         )).all()
         for log in history:
-            await websocket.send_text(json.dumps({"id": str(log.id), "stream": log.stream, "content": log.content, "timestamp": log.timestamp.isoformat()}))
+            log_id = str(log.id)
+            sent_log_ids.add(log_id)
+            await websocket.send_text(json.dumps({"id": log_id, "stream": log.stream, "content": log.content, "timestamp": log.timestamp.isoformat()}))
     while True:
         buffered = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0)
         if buffered is None:
             break
         if buffered.get("type") == "message":
+            log_id = log_message_id(buffered["data"])
+            if log_id and log_id in sent_log_ids:
+                continue
+            if log_id:
+                sent_log_ids.add(log_id)
             await websocket.send_text(buffered["data"])
     last_heartbeat = time.monotonic()
     last_client = time.monotonic()
@@ -275,6 +293,11 @@ async def pipeline_logs(websocket: WebSocket, pipeline_id: UUID, run_id: UUID) -
                 break
             message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.25)
             if message and message.get("type") == "message":
+                log_id = log_message_id(message["data"])
+                if log_id and log_id in sent_log_ids:
+                    continue
+                if log_id:
+                    sent_log_ids.add(log_id)
                 await websocket.send_text(message["data"])
             try:
                 client_message = await asyncio.wait_for(websocket.receive_text(), timeout=0.25)
