@@ -24,3 +24,21 @@ def test_repo_connection_requires_provider_and_url() -> None:
         repo_name="example/repo",
     )
     assert payload.repo_name == "example/repo"
+
+from datetime import datetime
+from uuid import uuid4
+
+from app.modules.repo.schemas import RepoConnectionResponse
+
+
+def test_repo_connection_response_does_not_expose_webhook_secret() -> None:
+    response = RepoConnectionResponse(
+        id=uuid4(),
+        project_id=uuid4(),
+        provider="github",
+        repo_url="https://github.com/example/repo",
+        repo_name="example/repo",
+        is_active=True,
+        created_at=datetime(2026, 8, 15),
+    )
+    assert "webhook_secret" not in response.model_dump()

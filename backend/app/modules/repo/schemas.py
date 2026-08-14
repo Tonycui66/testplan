@@ -19,7 +19,6 @@ class RepoConnectionResponse(BaseModel):
     repo_url: str
     repo_name: str
     oauth_token_id: Optional[UUID] = None
-    webhook_secret: Optional[str] = None
     is_active: bool = True
     created_at: datetime
 

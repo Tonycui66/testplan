@@ -5,14 +5,18 @@ from typing import Any, Dict, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.redis_client import get_redis
 from app.dependencies import get_current_user, get_db, require_project_access
+from app.modules.project.router import require_owner
 from app.modules.pipeline import models as pm
 from app.modules.pipeline.schemas import PipelineCreate, PipelineResponse, PipelineUpdate, RunCreate
+from app.core.security import decode_access_token
+from app.dependencies import get_session_factory
+from app.modules.project.models import ProjectMember
 from app.modules.user.models import User
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/pipelines", tags=["pipeline"], dependencies=[Depends(require_project_access)])
@@ -88,7 +92,8 @@ async def update_pipeline(project_id: UUID, pipeline_id: UUID, payload: Pipeline
 
 
 @router.delete("/{pipeline_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_pipeline(project_id: UUID, pipeline_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> None:
+async def delete_pipeline(project_id: UUID, pipeline_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    await require_owner(project_id, user, db)
     pipeline = await get_pipeline(project_id, pipeline_id, db)
     await db.delete(pipeline)
     await db.commit()
@@ -99,10 +104,13 @@ async def trigger_run(project_id: UUID, pipeline_id: UUID, payload: RunCreate, d
     pipeline = await get_pipeline(project_id, pipeline_id, db)
     if not pipeline.is_enabled:
         raise ConflictError("Pipeline is disabled")
-    pipeline.run_counter += 1
+    run_number = await db.scalar(
+        text("UPDATE pipeline.pipelines SET run_counter = run_counter + 1 WHERE id = :id RETURNING run_counter"),
+        {"id": pipeline.id},
+    )
     run = pm.PipelineRun(
         pipeline_id=pipeline.id,
-        run_number=pipeline.run_counter,
+        run_number=int(run_number or pipeline.run_counter + 1),
         trigger_type=payload.trigger_type,
         trigger_user_id=user.id,
         branch=payload.branch,
@@ -126,7 +134,13 @@ async def trigger_run(project_id: UUID, pipeline_id: UUID, payload: RunCreate, d
             job_run_ids[str(job.id)] = job_run.id
     await db.commit()
     redis = get_redis()
-    await redis.rpush("queue:pipeline", json.dumps({"run_id": str(run.id), "job_run_ids": {str(k): str(v) for k, v in job_run_ids.items()}}))
+    try:
+        await redis.rpush("queue:pipeline", json.dumps({"run_id": str(run.id), "job_run_ids": {str(k): str(v) for k, v in job_run_ids.items()}}))
+    except Exception:
+        run.status = "failed"
+        run.finished_at = datetime.now(timezone.utc)
+        await db.commit()
+        return {"id": run.id, "pipeline_id": pipeline.id, "run_number": run.run_number, "status": run.status}
     return {"id": run.id, "pipeline_id": pipeline.id, "run_number": run.run_number, "status": run.status}
 
 
@@ -167,6 +181,25 @@ async def cancel_run(project_id: UUID, pipeline_id: UUID, run_id: UUID, db: Asyn
 
 @ws_router.websocket("/pipelines/{run_id}/logs")
 async def pipeline_logs(websocket: WebSocket, run_id: UUID) -> None:
+    token = websocket.query_params.get("token") or websocket.headers.get("authorization", "").removeprefix("Bearer ")
+    subject = decode_access_token(token) if token else None
+    if not subject:
+        await websocket.close(code=1008)
+        return
+    session_factory = get_session_factory()
+    async with session_factory() as db:
+        run = await db.get(pm.PipelineRun, run_id)
+        if run is None:
+            await websocket.close(code=1008)
+            return
+        pipeline = await db.get(pm.Pipeline, run.pipeline_id)
+        if pipeline is None:
+            await websocket.close(code=1008)
+            return
+        member = await db.scalar(select(ProjectMember).where(ProjectMember.project_id == pipeline.project_id, ProjectMember.user_id == UUID(subject)))
+        if member is None:
+            await websocket.close(code=1008)
+            return
     await websocket.accept()
     redis = get_redis()
     pubsub = redis.pubsub()

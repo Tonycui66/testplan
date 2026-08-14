@@ -19,6 +19,20 @@ export async function createPipeline(projectId: string, payload: Record<string, 
   return data
 }
 
+export async function getPipeline(projectId: string, pipelineId: string) {
+  const { data } = await client.get(`/projects/${projectId}/pipelines/${pipelineId}`)
+  return data
+}
+
+export async function updatePipeline(
+  projectId: string,
+  pipelineId: string,
+  payload: Record<string, unknown>
+) {
+  const { data } = await client.patch(`/projects/${projectId}/pipelines/${pipelineId}`, payload)
+  return data
+}
+
 export async function triggerPipeline(projectId: string, pipelineId: string, payload = {}) {
   const { data } = await client.post(`/projects/${projectId}/pipelines/${pipelineId}/run`, payload)
   return data

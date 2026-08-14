@@ -1,4 +1,7 @@
 from __future__ import annotations
+import hashlib
+import hmac
+import json
 import secrets
 from typing import Any, Dict, Optional
 from uuid import UUID
@@ -9,8 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
 from app.dependencies import get_current_user, get_db, require_project_access
+from app.modules.project.router import require_owner
 from app.modules.repo import models as rm
 from app.modules.repo.schemas import RepoConnectionCreate, RepoConnectionResponse, WebhookEventCreate
+from app.core.redis_client import get_redis
 from app.modules.user.models import User
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/repo", tags=["repo"], dependencies=[Depends(require_project_access)])
@@ -40,7 +45,8 @@ async def list_connections(project_id: UUID, db: AsyncSession = Depends(get_db),
 
 
 @router.delete("/connections/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_connection(project_id: UUID, connection_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> None:
+async def delete_connection(project_id: UUID, connection_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    await require_owner(project_id, user, db)
     connection = await get_connection(project_id, connection_id, db)
     connection.is_active = False
     await db.commit()
@@ -68,7 +74,22 @@ async def receive_webhook(provider: str, payload: WebhookEventCreate, request: R
     connection_id = payload.payload.get("connection_id")
     if not connection_id:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="connection_id is required")
-    event = rm.WebhookEvent(connection_id=UUID(str(connection_id)), event_type=payload.event_type, payload=payload.payload, processed=False)
+    connection = await db.get(rm.RepoConnection, UUID(str(connection_id)))
+    if connection is None or not connection.webhook_secret:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid webhook target")
+    raw_body = await request.body()
+    header_names = ["x-hub-signature-256", "x-gitlab-token", "x-signature"]
+    signature = next((request.headers.get(name, "") for name in header_names if request.headers.get(name)), "")
+    if signature.startswith("sha256="):
+        expected = hmac.new(connection.webhook_secret.encode(), raw_body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(f"sha256={expected}", signature):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid webhook signature")
+    else:
+        expected = hmac.new(connection.webhook_secret.encode(), raw_body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid webhook signature")
+    event = rm.WebhookEvent(connection_id=connection.id, event_type=payload.event_type, payload=payload.payload, processed=False)
     db.add(event)
     await db.commit()
+    await get_redis().rpush("queue:webhook", json.dumps({"event_id": str(event.id), "connection_id": str(connection.id), "payload": payload.payload}))
     return {"id": event.id, "event_type": event.event_type, "processed": event.processed}
