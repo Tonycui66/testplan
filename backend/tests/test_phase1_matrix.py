@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from app.core.exceptions import NotFoundError
 from app.dependencies import require_project_access
 from app.modules.project import router as project_router
-from app.modules.project.schemas import IterationUpdate
+from app.modules.project.schemas import BoardCardUpdate, BoardColumnUpdate, IterationUpdate
 from app.modules.user import router as user_router
 from app.modules.user.schemas import RefreshRequest
 
@@ -118,5 +118,73 @@ def test_soft_deleted_iteration_patch_delete_return_404() -> None:
         db = FakeDB(scalar_result=None)
         with pytest.raises(NotFoundError):
             await project_router.delete_iteration(project_id, iteration_id, db, user)
+
+    asyncio.run(run())
+
+
+def test_board_column_rejects_resource_from_other_project() -> None:
+    project_a = uuid4()
+    project_b = uuid4()
+    column_id = uuid4()
+    board_a = SimpleNamespace(id=uuid4(), project_id=project_a)
+    board_b = SimpleNamespace(id=uuid4(), project_id=project_b)
+    user = SimpleNamespace(id=uuid4(), is_superadmin=False)
+
+    async def run():
+        db = FakeDB()
+        db.scalar.side_effect = [board_b, None]
+        with pytest.raises(NotFoundError):
+            await project_router.update_board_column(
+                project_a,
+                column_id,
+                BoardColumnUpdate(name="bad"),
+                db,
+                user,
+            )
+
+        db = FakeDB()
+        db.scalar.side_effect = [board_b, None]
+        with pytest.raises(NotFoundError):
+            await project_router.delete_board_column(project_a, column_id, db, user)
+
+    asyncio.run(run())
+
+
+def test_board_card_rejects_resource_from_other_project() -> None:
+    project_a = uuid4()
+    project_b = uuid4()
+    card_id = uuid4()
+    board_b = SimpleNamespace(id=uuid4(), project_id=project_b)
+    user = SimpleNamespace(id=uuid4(), is_superadmin=False)
+
+    async def run():
+        db = FakeDB()
+        db.scalar.side_effect = [board_b, None]
+        with pytest.raises(NotFoundError):
+            await project_router.update_board_card(
+                project_a,
+                card_id,
+                BoardCardUpdate(order=1),
+                db,
+                user,
+            )
+
+        db = FakeDB()
+        db.scalar.side_effect = [board_b, None]
+        with pytest.raises(NotFoundError):
+            await project_router.delete_board_card(project_a, card_id, db, user)
+
+    asyncio.run(run())
+
+
+def test_team_pagination_is_normalized() -> None:
+    user = SimpleNamespace(id=uuid4(), is_superadmin=False)
+
+    async def run():
+        db = FakeDB()
+        db.scalar = AsyncMock(return_value=0)
+        db.scalars = AsyncMock(return_value=SimpleNamespace(all=lambda: []))
+        result = await user_router.list_teams(1, 200, db, user)
+        assert result["meta"]["page_size"] == 100
 
     asyncio.run(run())

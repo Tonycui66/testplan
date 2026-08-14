@@ -140,7 +140,8 @@ async def list_teams(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    offset = (max(page, 1) - 1) * min(max(page_size, 1), 100)
+    normalized_page, normalized_page_size = normalize_pagination(page, page_size)
+    offset = (normalized_page - 1) * normalized_page_size
     stmt = (
         select(Team)
         .join(TeamMember, TeamMember.team_id == Team.id, isouter=True)
@@ -148,8 +149,8 @@ async def list_teams(
         .distinct()
     )
     total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-    teams = (await db.scalars(stmt.order_by(Team.created_at.desc()).offset(offset).limit(page_size))).all()
-    return {"items": [TeamResponse.model_validate(team).model_dump() for team in teams], "meta": {"page": page, "page_size": page_size, "total": total}}
+    teams = (await db.scalars(stmt.order_by(Team.created_at.desc()).offset(offset).limit(normalized_page_size))).all()
+    return {"items": [TeamResponse.model_validate(team).model_dump() for team in teams], "meta": {"page": normalized_page, "page_size": normalized_page_size, "total": total}}
 
 
 @router.post("/teams", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)

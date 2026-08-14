@@ -367,6 +367,13 @@ async def get_board(project_id: UUID, db: AsyncSession = Depends(get_db), _: Use
     }
 
 
+
+async def get_project_board(project_id: UUID, db: AsyncSession) -> pm.Board:
+    board = await db.scalar(select(pm.Board).where(pm.Board.project_id == project_id))
+    if board is None:
+        raise NotFoundError("Board not found")
+    return board
+
 @router.post("/{project_id}/board/columns", status_code=status.HTTP_201_CREATED)
 async def create_board_column(project_id: UUID, payload: BoardColumnCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     board = await db.scalar(select(pm.Board).where(pm.Board.project_id == project_id))
@@ -380,7 +387,8 @@ async def create_board_column(project_id: UUID, payload: BoardColumnCreate, db: 
 
 @router.patch("/{project_id}/board/columns/{column_id}")
 async def update_board_column(project_id: UUID, column_id: UUID, payload: BoardColumnUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
-    column = await db.get(pm.BoardColumn, column_id)
+    board = await get_project_board(project_id, db)
+    column = await db.scalar(select(pm.BoardColumn).where(pm.BoardColumn.id == column_id, pm.BoardColumn.board_id == board.id))
     if column is None:
         raise NotFoundError("Board column not found")
     if payload.name is not None:
@@ -393,7 +401,8 @@ async def update_board_column(project_id: UUID, column_id: UUID, payload: BoardC
 
 @router.delete("/{project_id}/board/columns/{column_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_board_column(project_id: UUID, column_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> None:
-    column = await db.get(pm.BoardColumn, column_id)
+    board = await get_project_board(project_id, db)
+    column = await db.scalar(select(pm.BoardColumn).where(pm.BoardColumn.id == column_id, pm.BoardColumn.board_id == board.id))
     if column is None:
         raise NotFoundError("Board column not found")
     await db.delete(column)
@@ -414,7 +423,8 @@ async def create_board_card(project_id: UUID, payload: BoardCardCreate, db: Asyn
 
 @router.patch("/{project_id}/board/cards/{card_id}")
 async def update_board_card(project_id: UUID, card_id: UUID, payload: BoardCardUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
-    card = await db.get(pm.BoardCard, card_id)
+    board = await get_project_board(project_id, db)
+    card = await db.scalar(select(pm.BoardCard).where(pm.BoardCard.id == card_id, pm.BoardCard.board_id == board.id))
     if card is None:
         raise NotFoundError("Board card not found")
     if payload.column_id is not None:
@@ -427,7 +437,8 @@ async def update_board_card(project_id: UUID, card_id: UUID, payload: BoardCardU
 
 @router.delete("/{project_id}/board/cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_board_card(project_id: UUID, card_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> None:
-    card = await db.get(pm.BoardCard, card_id)
+    board = await get_project_board(project_id, db)
+    card = await db.scalar(select(pm.BoardCard).where(pm.BoardCard.id == card_id, pm.BoardCard.board_id == board.id))
     if card is None:
         raise NotFoundError("Board card not found")
     await db.delete(card)
