@@ -162,18 +162,21 @@ async def create_team(payload: TeamCreate, db: AsyncSession = Depends(get_db), u
     return TeamResponse.model_validate(team)
 
 
-async def get_owned_team(team_id: UUID, user: User, db: AsyncSession) -> Team:
+async def get_team_with_role(team_id: UUID, user: User, db: AsyncSession, allowed_roles: set[str]) -> Team:
     team = await db.get(Team, team_id)
     if team is None:
         raise NotFoundError("Team not found")
-    if team.created_by != user.id and not user.is_superadmin:
+    if team.created_by == user.id or user.is_superadmin:
+        return team
+    member = await db.scalar(select(TeamMember).where(TeamMember.team_id == team_id, TeamMember.user_id == user.id))
+    if member is None or member.role not in allowed_roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Team access denied")
     return team
 
 
 @router.get("/teams/{team_id}", response_model=dict)
 async def get_team(team_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
-    team = await get_owned_team(team_id, user, db)
+    team = await get_team_with_role(team_id, user, db, {"owner", "admin", "member"})
     members = (await db.scalars(select(TeamMember).where(TeamMember.team_id == team_id))).all()
     return {
         "id": team.id,
@@ -185,7 +188,7 @@ async def get_team(team_id: UUID, db: AsyncSession = Depends(get_db), user: User
 
 @router.patch("/teams/{team_id}", response_model=TeamResponse)
 async def update_team(team_id: UUID, payload: TeamUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> TeamResponse:
-    team = await get_owned_team(team_id, user, db)
+    team = await get_team_with_role(team_id, user, db, {"owner"})
     if payload.name is not None:
         team.name = payload.name
     if payload.description is not None:
@@ -197,14 +200,14 @@ async def update_team(team_id: UUID, payload: TeamUpdate, db: AsyncSession = Dep
 
 @router.delete("/teams/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_team(team_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
-    team = await get_owned_team(team_id, user, db)
+    team = await get_team_with_role(team_id, user, db, {"owner"})
     await db.delete(team)
     await db.commit()
 
 
 @router.post("/teams/{team_id}/members", response_model=TeamMemberCreate)
 async def add_team_member(team_id: UUID, payload: TeamMemberCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> TeamMemberCreate:
-    await get_owned_team(team_id, user, db)
+    await get_team_with_role(team_id, user, db, {"owner", "admin"})
     existing = await db.scalar(select(TeamMember).where(TeamMember.team_id == team_id, TeamMember.user_id == payload.user_id))
     if existing:
         raise ConflictError("User is already a team member")
@@ -216,7 +219,9 @@ async def add_team_member(team_id: UUID, payload: TeamMemberCreate, db: AsyncSes
 
 @router.delete("/teams/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_team_member(team_id: UUID, user_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
-    await get_owned_team(team_id, user, db)
+    team = await get_team_with_role(team_id, user, db, {"owner", "admin"})
+    if user_id == team.created_by and not user.is_superadmin:
+        raise ConflictError("Team creator cannot be removed")
     member = await db.scalar(select(TeamMember).where(TeamMember.team_id == team_id, TeamMember.user_id == user_id))
     if member is None:
         raise NotFoundError("Team member not found")

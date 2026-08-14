@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -98,11 +98,18 @@ async def list_projects(page: int = 1, page_size: int = 20, search: str = "", db
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
-async def get_project(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> ProjectResponse:
+async def get_project(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     project = await db.get(pm.Project, project_id)
     if project is None or project.deleted_at is not None:
         raise NotFoundError("Project not found")
-    return project_response(project)
+    stats = {
+        "iterations": await db.scalar(select(func.count()).select_from(pm.Iteration).where(pm.Iteration.project_id == project_id, pm.Iteration.deleted_at.is_(None))) or 0,
+        "requirements": await db.scalar(select(func.count()).select_from(pm.Requirement).where(pm.Requirement.project_id == project_id, pm.Requirement.deleted_at.is_(None))) or 0,
+        "tasks": await db.scalar(select(func.count()).select_from(pm.Task).where(pm.Task.project_id == project_id, pm.Task.deleted_at.is_(None))) or 0,
+        "bugs": await db.scalar(select(func.count()).select_from(pm.Bug).where(pm.Bug.project_id == project_id, pm.Bug.deleted_at.is_(None))) or 0,
+        "members": await db.scalar(select(func.count()).select_from(pm.ProjectMember).where(pm.ProjectMember.project_id == project_id)) or 0,
+    }
+    return {**project_response(project).model_dump(), "stats": stats}
 
 
 @router.patch("/{project_id}", response_model=ProjectResponse)
@@ -183,9 +190,11 @@ async def create_iteration(project_id: UUID, payload: IterationCreate, db: Async
 
 
 @router.get("/{project_id}/iterations", response_model=dict)
-async def list_iterations(project_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+async def list_iterations(project_id: UUID, page: int = 1, page_size: int = 20, status: Optional[str] = None, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     normalized_page, normalized_page_size = normalize_pagination(page, page_size)
     stmt = select(pm.Iteration).where(pm.Iteration.project_id == project_id, pm.Iteration.deleted_at.is_(None))
+    if status:
+        stmt = stmt.where(pm.Iteration.status == status)
     total = await count_rows(db, stmt)
     offset = (normalized_page - 1) * normalized_page_size
     rows = (await db.scalars(stmt.order_by(pm.Iteration.created_at.desc()).offset(offset).limit(normalized_page_size))).all()
@@ -222,9 +231,19 @@ async def create_requirement(project_id: UUID, payload: RequirementCreate, db: A
 
 
 @router.get("/{project_id}/requirements", response_model=dict)
-async def list_requirements(project_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+async def list_requirements(project_id: UUID, page: int = 1, page_size: int = 20, status: Optional[str] = None, priority: Optional[str] = None, iteration_id: Optional[UUID] = None, assignee_id: Optional[UUID] = None, search: str = "", db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     normalized_page, normalized_page_size = normalize_pagination(page, page_size)
     stmt = select(pm.Requirement).where(pm.Requirement.project_id == project_id, pm.Requirement.deleted_at.is_(None))
+    if status:
+        stmt = stmt.where(pm.Requirement.status == status)
+    if priority:
+        stmt = stmt.where(pm.Requirement.priority == priority)
+    if iteration_id:
+        stmt = stmt.where(pm.Requirement.iteration_id == iteration_id)
+    if assignee_id:
+        stmt = stmt.where(pm.Requirement.assignee_id == assignee_id)
+    if search:
+        stmt = stmt.where(pm.Requirement.title.ilike(f"%{search}%"))
     total = await count_rows(db, stmt)
     offset = (normalized_page - 1) * normalized_page_size
     rows = (await db.scalars(stmt.order_by(pm.Requirement.created_at.desc()).offset(offset).limit(normalized_page_size))).all()
@@ -271,9 +290,21 @@ async def create_task(project_id: UUID, payload: TaskCreate, db: AsyncSession = 
 
 
 @router.get("/{project_id}/tasks", response_model=dict)
-async def list_tasks(project_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+async def list_tasks(project_id: UUID, page: int = 1, page_size: int = 20, status: Optional[str] = None, priority: Optional[str] = None, assignee_id: Optional[UUID] = None, iteration_id: Optional[UUID] = None, requirement_id: Optional[UUID] = None, search: str = "", db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     normalized_page, normalized_page_size = normalize_pagination(page, page_size)
     stmt = select(pm.Task).where(pm.Task.project_id == project_id, pm.Task.deleted_at.is_(None))
+    if status:
+        stmt = stmt.where(pm.Task.status == status)
+    if priority:
+        stmt = stmt.where(pm.Task.priority == priority)
+    if assignee_id:
+        stmt = stmt.where(pm.Task.assignee_id == assignee_id)
+    if iteration_id:
+        stmt = stmt.where(pm.Task.iteration_id == iteration_id)
+    if requirement_id:
+        stmt = stmt.join(pm.RequirementTask, pm.RequirementTask.task_id == pm.Task.id).where(pm.RequirementTask.requirement_id == requirement_id)
+    if search:
+        stmt = stmt.where(pm.Task.title.ilike(f"%{search}%"))
     total = await count_rows(db, stmt)
     offset = (normalized_page - 1) * normalized_page_size
     rows = (await db.scalars(stmt.order_by(pm.Task.created_at.desc()).offset(offset).limit(normalized_page_size))).all()
@@ -317,9 +348,19 @@ async def create_bug(project_id: UUID, payload: BugCreate, db: AsyncSession = De
 
 
 @router.get("/{project_id}/bugs", response_model=dict)
-async def list_bugs(project_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+async def list_bugs(project_id: UUID, page: int = 1, page_size: int = 20, severity: Optional[str] = None, priority: Optional[str] = None, status: Optional[str] = None, assignee_id: Optional[UUID] = None, iteration_id: Optional[UUID] = None, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     normalized_page, normalized_page_size = normalize_pagination(page, page_size)
     stmt = select(pm.Bug).where(pm.Bug.project_id == project_id, pm.Bug.deleted_at.is_(None))
+    if severity:
+        stmt = stmt.where(pm.Bug.severity == severity)
+    if priority:
+        stmt = stmt.where(pm.Bug.priority == priority)
+    if status:
+        stmt = stmt.where(pm.Bug.status == status)
+    if assignee_id:
+        stmt = stmt.where(pm.Bug.assignee_id == assignee_id)
+    if iteration_id:
+        stmt = stmt.where(pm.Bug.iteration_id == iteration_id)
     total = await count_rows(db, stmt)
     offset = (normalized_page - 1) * normalized_page_size
     rows = (await db.scalars(stmt.order_by(pm.Bug.created_at.desc()).offset(offset).limit(normalized_page_size))).all()
@@ -405,15 +446,19 @@ async def delete_board_column(project_id: UUID, column_id: UUID, db: AsyncSessio
     column = await db.scalar(select(pm.BoardColumn).where(pm.BoardColumn.id == column_id, pm.BoardColumn.board_id == board.id))
     if column is None:
         raise NotFoundError("Board column not found")
+    card_count = await db.scalar(select(func.count()).select_from(pm.BoardCard).where(pm.BoardCard.column_id == column_id)) or 0
+    if card_count:
+        raise ConflictError("Board column still has cards")
     await db.delete(column)
     await db.commit()
 
 
 @router.post("/{project_id}/board/cards", status_code=status.HTTP_201_CREATED)
 async def create_board_card(project_id: UUID, payload: BoardCardCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
-    board = await db.scalar(select(pm.Board).where(pm.Board.project_id == project_id))
-    if board is None:
-        raise NotFoundError("Board not found")
+    board = await get_project_board(project_id, db)
+    column = await db.scalar(select(pm.BoardColumn).where(pm.BoardColumn.id == payload.column_id, pm.BoardColumn.board_id == board.id))
+    if column is None:
+        raise NotFoundError("Board column not found")
     card = pm.BoardCard(board_id=board.id, **payload.model_dump())
     db.add(card)
     await db.commit()
@@ -428,6 +473,9 @@ async def update_board_card(project_id: UUID, card_id: UUID, payload: BoardCardU
     if card is None:
         raise NotFoundError("Board card not found")
     if payload.column_id is not None:
+        column = await db.scalar(select(pm.BoardColumn).where(pm.BoardColumn.id == payload.column_id, pm.BoardColumn.board_id == board.id))
+        if column is None:
+            raise NotFoundError("Board column not found")
         card.column_id = payload.column_id
     if payload.order is not None:
         card.order = payload.order

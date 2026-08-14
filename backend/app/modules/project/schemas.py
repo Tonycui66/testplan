@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Any, Dict, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -23,6 +23,7 @@ class ProjectResponse(BaseModel):
     description: Optional[str] = None
     is_archived: bool = False
     created_at: datetime
+    stats: Optional[Dict[str, Any]] = None
 
     model_config = {"from_attributes": True}
 
@@ -78,7 +79,7 @@ class TaskCreate(BaseModel):
 class BugCreate(BaseModel):
     title: str
     description: Optional[str] = None
-    severity: Literal["low", "medium", "high", "critical"] = "medium"
+    severity: Literal["blocker", "critical", "high", "medium", "low"] = "medium"
     priority: Literal["low", "medium", "high", "critical"] = "medium"
     assignee_id: Optional[UUID] = None
     iteration_id: Optional[UUID] = None
@@ -116,9 +117,9 @@ class BugUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     steps_to_reproduce: Optional[str] = None
-    severity: Optional[Literal["low", "medium", "high", "critical"]] = None
+    severity: Optional[Literal["blocker", "critical", "high", "medium", "low"]] = None
     priority: Optional[Literal["low", "medium", "high", "critical"]] = None
-    status: Optional[Literal["open", "in_progress", "resolved", "closed"]] = None
+    status: Optional[Literal["open", "in_progress", "resolved", "closed", "reopened"]] = None
     assignee_id: Optional[UUID] = None
     iteration_id: Optional[UUID] = None
 

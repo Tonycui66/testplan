@@ -6,12 +6,13 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.dependencies import require_project_access
 from app.modules.project import router as project_router
-from app.modules.project.schemas import BoardCardUpdate, BoardColumnUpdate, IterationUpdate
+from app.modules.project.schemas import BoardCardCreate, BoardCardUpdate, BoardColumnUpdate, BugCreate, BugUpdate, IterationUpdate
 from app.modules.user import router as user_router
-from app.modules.user.schemas import RefreshRequest
+from app.modules.user.schemas import RefreshRequest, TeamUpdate
+from pydantic import ValidationError
 
 
 class FakeDB:
@@ -186,5 +187,109 @@ def test_team_pagination_is_normalized() -> None:
         db.scalars = AsyncMock(return_value=SimpleNamespace(all=lambda: []))
         result = await user_router.list_teams(1, 200, db, user)
         assert result["meta"]["page_size"] == 100
+
+    asyncio.run(run())
+
+
+def test_bug_enum_accepts_blocker_and_reopened() -> None:
+    assert BugCreate(title="Bug", severity="blocker").severity == "blocker"
+    assert BugUpdate(status="reopened").status == "reopened"
+    with pytest.raises(ValidationError):
+        BugCreate(title="Bug", severity="invalid")
+
+
+def test_board_column_delete_rejects_nonempty_column() -> None:
+    board = SimpleNamespace(id=uuid4())
+    user = SimpleNamespace(id=uuid4(), is_superadmin=False)
+
+    async def run():
+        db = FakeDB()
+        db.scalar.side_effect = [board, SimpleNamespace(id=uuid4()), 1]
+        with pytest.raises(ConflictError):
+            await project_router.delete_board_column(uuid4(), uuid4(), db, user)
+
+    asyncio.run(run())
+
+
+def test_board_card_rejects_column_from_other_board() -> None:
+    board = SimpleNamespace(id=uuid4())
+    user = SimpleNamespace(id=uuid4(), is_superadmin=False)
+
+    async def run():
+        db = FakeDB()
+        db.scalar.side_effect = [board, None]
+        with pytest.raises(NotFoundError):
+            await project_router.create_board_card(
+                uuid4(),
+                BoardCardCreate(column_id=uuid4(), item_type="task", item_id=uuid4()),
+                db,
+                user,
+            )
+
+        card = SimpleNamespace(id=uuid4(), column_id=uuid4())
+        db = FakeDB()
+        db.scalar.side_effect = [board, card, None]
+        with pytest.raises(NotFoundError):
+            await project_router.update_board_card(
+                uuid4(),
+                card.id,
+                BoardCardUpdate(column_id=uuid4()),
+                db,
+                user,
+            )
+
+    asyncio.run(run())
+
+
+def test_project_detail_returns_stats() -> None:
+    project = SimpleNamespace(
+        id=uuid4(),
+        name="Project",
+        key="KEY",
+        description=None,
+        is_archived=False,
+        created_at="2026-08-15T00:00:00Z",
+        deleted_at=None,
+    )
+    user = SimpleNamespace(id=uuid4(), is_superadmin=False)
+
+    async def run():
+        db = FakeDB(get_result=project)
+        db.scalar.side_effect = [1, 2, 3, 4, 5]
+        result = await project_router.get_project(project.id, db, user)
+        assert result["stats"] == {"iterations": 1, "requirements": 2, "tasks": 3, "bugs": 4, "members": 5}
+
+    asyncio.run(run())
+
+
+def test_team_role_permissions() -> None:
+    team_id = uuid4()
+    owner = SimpleNamespace(id=uuid4(), is_superadmin=False)
+    member = SimpleNamespace(id=uuid4(), is_superadmin=False)
+
+    async def run():
+        team = SimpleNamespace(id=team_id, created_by=uuid4())
+        db = FakeDB(get_result=team, scalar_result=SimpleNamespace(role="member"))
+        with pytest.raises(HTTPException):
+            await user_router.update_team(team_id, TeamUpdate(name="new"), db, member)
+
+        db = FakeDB(get_result=team, scalar_result=SimpleNamespace(role="owner"))
+        result = await user_router.get_team_with_role(team_id, owner, db, {"owner"})
+        assert result.id == team_id
+
+    asyncio.run(run())
+
+
+def test_list_routes_accept_filters() -> None:
+    project_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), is_superadmin=False)
+
+    async def run():
+        db = FakeDB()
+        db.scalar = AsyncMock(return_value=0)
+        db.scalars = AsyncMock(return_value=SimpleNamespace(all=lambda: []))
+        await project_router.list_requirements(project_id, 1, 20, status="draft", priority="high", db=db, _=user)
+        await project_router.list_tasks(project_id, 1, 20, status="todo", requirement_id=uuid4(), db=db, _=user)
+        await project_router.list_bugs(project_id, 1, 20, severity="blocker", db=db, _=user)
 
     asyncio.run(run())
