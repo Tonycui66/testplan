@@ -1,0 +1,183 @@
+from __future__ import annotations
+import json
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.exceptions import ConflictError, NotFoundError
+from app.core.redis_client import get_redis
+from app.dependencies import get_current_user, get_db, require_project_access
+from app.modules.pipeline import models as pm
+from app.modules.pipeline.schemas import PipelineCreate, PipelineResponse, PipelineUpdate, RunCreate
+from app.modules.user.models import User
+
+router = APIRouter(prefix="/api/v1/projects/{project_id}/pipelines", tags=["pipeline"], dependencies=[Depends(require_project_access)])
+ws_router = APIRouter(prefix="/api/v1/ws", tags=["pipeline-ws"])
+
+
+async def get_pipeline(project_id: UUID, pipeline_id: UUID, db: AsyncSession) -> pm.Pipeline:
+    pipeline = await db.scalar(select(pm.Pipeline).where(pm.Pipeline.id == pipeline_id, pm.Pipeline.project_id == project_id))
+    if pipeline is None:
+        raise NotFoundError("Pipeline not found")
+    return pipeline
+
+
+@router.post("", response_model=PipelineResponse, status_code=status.HTTP_201_CREATED)
+async def create_pipeline(project_id: UUID, payload: PipelineCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> PipelineResponse:
+    pipeline = pm.Pipeline(project_id=project_id, name=payload.name, description=payload.description)
+    db.add(pipeline)
+    await db.flush()
+    for stage_input in payload.stages:
+        stage = pm.PipelineStage(pipeline_id=pipeline.id, name=stage_input.name, order=stage_input.order, condition=stage_input.condition)
+        db.add(stage)
+        await db.flush()
+        for job_input in stage_input.jobs:
+            db.add(pm.PipelineJob(stage_id=stage.id, **job_input.model_dump()))
+    await db.commit()
+    await db.refresh(pipeline)
+    return PipelineResponse.model_validate(pipeline)
+
+
+@router.get("", response_model=dict)
+async def list_pipelines(project_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    normalized_page = max(page, 1)
+    normalized_size = min(max(page_size, 1), 100)
+    stmt = select(pm.Pipeline).where(pm.Pipeline.project_id == project_id)
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = (await db.scalars(stmt.order_by(pm.Pipeline.created_at.desc()).offset((normalized_page - 1) * normalized_size).limit(normalized_size))).all()
+    return {"items": [PipelineResponse.model_validate(p).model_dump() for p in rows], "meta": {"page": normalized_page, "page_size": normalized_size, "total": total}}
+
+
+@router.get("/{pipeline_id}", response_model=dict)
+async def get_pipeline_detail(project_id: UUID, pipeline_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    pipeline = await get_pipeline(project_id, pipeline_id, db)
+    stages = (await db.scalars(select(pm.PipelineStage).where(pm.PipelineStage.pipeline_id == pipeline.id).order_by(pm.PipelineStage.order))).all()
+    detail: Dict[str, Any] = PipelineResponse.model_validate(pipeline).model_dump()
+    detail["stages"] = []
+    for stage in stages:
+        jobs = (await db.scalars(select(pm.PipelineJob).where(pm.PipelineJob.stage_id == stage.id).order_by(pm.PipelineJob.order))).all()
+        detail["stages"].append({
+            "id": stage.id,
+            "name": stage.name,
+            "order": stage.order,
+            "condition": stage.condition,
+            "jobs": [
+                {"id": j.id, "name": j.name, "image": j.image, "script": j.script, "timeout_seconds": j.timeout_seconds, "variables": j.variables}
+                for j in jobs
+            ],
+        })
+    return detail
+
+
+@router.patch("/{pipeline_id}", response_model=PipelineResponse)
+async def update_pipeline(project_id: UUID, pipeline_id: UUID, payload: PipelineUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> PipelineResponse:
+    pipeline = await get_pipeline(project_id, pipeline_id, db)
+    if payload.name is not None:
+        pipeline.name = payload.name
+    if payload.description is not None:
+        pipeline.description = payload.description
+    if payload.is_enabled is not None:
+        pipeline.is_enabled = payload.is_enabled
+    await db.commit()
+    await db.refresh(pipeline)
+    return PipelineResponse.model_validate(pipeline)
+
+
+@router.delete("/{pipeline_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_pipeline(project_id: UUID, pipeline_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> None:
+    pipeline = await get_pipeline(project_id, pipeline_id, db)
+    await db.delete(pipeline)
+    await db.commit()
+
+
+@router.post("/{pipeline_id}/run", status_code=status.HTTP_201_CREATED)
+async def trigger_run(project_id: UUID, pipeline_id: UUID, payload: RunCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
+    pipeline = await get_pipeline(project_id, pipeline_id, db)
+    if not pipeline.is_enabled:
+        raise ConflictError("Pipeline is disabled")
+    pipeline.run_counter += 1
+    run = pm.PipelineRun(
+        pipeline_id=pipeline.id,
+        run_number=pipeline.run_counter,
+        trigger_type=payload.trigger_type,
+        trigger_user_id=user.id,
+        branch=payload.branch,
+        commit_sha=payload.commit_sha,
+        variables=payload.variables,
+        status="pending",
+    )
+    db.add(run)
+    await db.flush()
+    stages = (await db.scalars(select(pm.PipelineStage).where(pm.PipelineStage.pipeline_id == pipeline.id).order_by(pm.PipelineStage.order))).all()
+    job_run_ids: Dict[str, UUID] = {}
+    for stage in stages:
+        stage_run = pm.StageRun(run_id=run.id, stage_id=stage.id, name=stage.name, status="pending", order=stage.order)
+        db.add(stage_run)
+        await db.flush()
+        jobs = (await db.scalars(select(pm.PipelineJob).where(pm.PipelineJob.stage_id == stage.id).order_by(pm.PipelineJob.order))).all()
+        for job in jobs:
+            job_run = pm.JobRun(stage_run_id=stage_run.id, job_id=job.id, name=job.name, status="pending")
+            db.add(job_run)
+            await db.flush()
+            job_run_ids[str(job.id)] = job_run.id
+    await db.commit()
+    redis = get_redis()
+    await redis.rpush("queue:pipeline", json.dumps({"run_id": str(run.id), "job_run_ids": {str(k): str(v) for k, v in job_run_ids.items()}}))
+    return {"id": run.id, "pipeline_id": pipeline.id, "run_number": run.run_number, "status": run.status}
+
+
+@router.get("/{pipeline_id}/runs", response_model=dict)
+async def list_runs(project_id: UUID, pipeline_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    pipeline = await get_pipeline(project_id, pipeline_id, db)
+    normalized_page = max(page, 1)
+    normalized_size = min(max(page_size, 1), 100)
+    stmt = select(pm.PipelineRun).where(pm.PipelineRun.pipeline_id == pipeline.id)
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = (await db.scalars(stmt.order_by(pm.PipelineRun.run_number.desc()).offset((normalized_page - 1) * normalized_size).limit(normalized_size))).all()
+    return {"items": [{"id": r.id, "run_number": r.run_number, "status": r.status, "started_at": r.started_at, "finished_at": r.finished_at} for r in rows], "meta": {"page": normalized_page, "page_size": normalized_size, "total": total}}
+
+
+@router.get("/{pipeline_id}/runs/{run_id}")
+async def get_run(project_id: UUID, pipeline_id: UUID, run_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    pipeline = await get_pipeline(project_id, pipeline_id, db)
+    run = await db.scalar(select(pm.PipelineRun).where(pm.PipelineRun.id == run_id, pm.PipelineRun.pipeline_id == pipeline.id))
+    if run is None:
+        raise NotFoundError("Pipeline run not found")
+    stages = (await db.scalars(select(pm.StageRun).where(pm.StageRun.run_id == run.id).order_by(pm.StageRun.order))).all()
+    return {"id": run.id, "run_number": run.run_number, "status": run.status, "stages": [{"id": s.id, "name": s.name, "status": s.status} for s in stages]}
+
+
+@router.post("/{pipeline_id}/runs/{run_id}/cancel", response_model=dict)
+async def cancel_run(project_id: UUID, pipeline_id: UUID, run_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    pipeline = await get_pipeline(project_id, pipeline_id, db)
+    run = await db.scalar(select(pm.PipelineRun).where(pm.PipelineRun.id == run_id, pm.PipelineRun.pipeline_id == pipeline.id))
+    if run is None:
+        raise NotFoundError("Pipeline run not found")
+    if run.status not in {"pending", "running"}:
+        raise ConflictError("Run is already finished")
+    run.status = "cancelled"
+    run.finished_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"id": run.id, "status": run.status}
+
+
+@ws_router.websocket("/pipelines/{run_id}/logs")
+async def pipeline_logs(websocket: WebSocket, run_id: UUID) -> None:
+    await websocket.accept()
+    redis = get_redis()
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(f"logs:{run_id}")
+    try:
+        while True:
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if message and message.get("type") == "message":
+                await websocket.send_text(message["data"])
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await pubsub.unsubscribe(f"logs:{run_id}")
+        await pubsub.close()

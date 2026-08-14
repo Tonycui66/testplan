@@ -14,7 +14,9 @@ from app.dependencies import get_database_engine
 from app.middleware.cors import setup_cors
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_id import RequestIDMiddleware
+from app.modules.pipeline.router import router as pipeline_router, ws_router as pipeline_ws_router
 from app.modules.project.router import router as project_router
+from app.modules.repo.router import router as repo_router, webhook_router as repo_webhook_router
 from app.modules.user.router import router as user_router
 
 
@@ -58,6 +60,10 @@ def create_app() -> FastAPI:
 
     app.include_router(user_router)
     app.include_router(project_router)
+    app.include_router(repo_router)
+    app.include_router(repo_webhook_router)
+    app.include_router(pipeline_router)
+    app.include_router(pipeline_ws_router)
 
     @app.exception_handler(AppError)
     async def app_error_handler(_, exc: AppError):
