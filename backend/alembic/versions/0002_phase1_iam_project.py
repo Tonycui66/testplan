@@ -14,8 +14,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("""
-    CREATE TABLE iam.users (
+    op.execute(
+        """
+        CREATE TABLE iam.users (
         id UUID PRIMARY KEY,
         email VARCHAR(255) NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
@@ -27,45 +28,64 @@ def upgrade() -> None:
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         deleted_at TIMESTAMPTZ
-    );
-    CREATE UNIQUE INDEX idx_users_email ON iam.users(email) WHERE deleted_at IS NULL;
-
-    CREATE TABLE iam.roles (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE UNIQUE INDEX idx_users_email ON iam.users(email) WHERE deleted_at IS NULL
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE iam.roles (
         id UUID PRIMARY KEY,
         name VARCHAR(50) NOT NULL UNIQUE,
         description VARCHAR(255),
         is_system BOOLEAN NOT NULL DEFAULT false,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-
-    CREATE TABLE iam.user_roles (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE iam.user_roles (
         id UUID PRIMARY KEY,
         user_id UUID NOT NULL,
         role_id UUID NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         CONSTRAINT uq_user_roles UNIQUE (user_id, role_id)
-    );
-
-    CREATE TABLE iam.teams (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE iam.teams (
         id UUID PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
         description TEXT,
         created_by UUID NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-
-    CREATE TABLE iam.team_members (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE iam.team_members (
         id UUID PRIMARY KEY,
         team_id UUID NOT NULL,
         user_id UUID NOT NULL,
         role VARCHAR(20) NOT NULL DEFAULT 'member',
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         CONSTRAINT uq_team_member UNIQUE (team_id, user_id)
-    );
-
-    CREATE TABLE iam.user_oauth_tokens (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE iam.user_oauth_tokens (
         id UUID PRIMARY KEY,
         user_id UUID NOT NULL,
         provider VARCHAR(20) NOT NULL,
@@ -73,9 +93,12 @@ def upgrade() -> None:
         refresh_token TEXT,
         expires_at TIMESTAMPTZ,
         provider_user_id VARCHAR(255)
-    );
-
-    CREATE TABLE project.projects (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.projects (
         id UUID PRIMARY KEY,
         name VARCHAR(200) NOT NULL,
         key VARCHAR(10) NOT NULL,
@@ -84,19 +107,29 @@ def upgrade() -> None:
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         deleted_at TIMESTAMPTZ
-    );
-    CREATE UNIQUE INDEX idx_projects_key ON project.projects(key) WHERE deleted_at IS NULL;
-
-    CREATE TABLE project.project_members (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE UNIQUE INDEX idx_projects_key ON project.projects(key) WHERE deleted_at IS NULL
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.project_members (
         id UUID PRIMARY KEY,
         project_id UUID NOT NULL,
         user_id UUID NOT NULL,
         role VARCHAR(20) NOT NULL DEFAULT 'member',
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         CONSTRAINT uq_project_member UNIQUE (project_id, user_id)
-    );
-
-    CREATE TABLE project.iterations (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.iterations (
         id UUID PRIMARY KEY,
         project_id UUID NOT NULL,
         name VARCHAR(200) NOT NULL,
@@ -107,9 +140,12 @@ def upgrade() -> None:
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         deleted_at TIMESTAMPTZ
-    );
-
-    CREATE TABLE project.requirements (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.requirements (
         id UUID PRIMARY KEY,
         project_id UUID NOT NULL,
         iteration_id UUID,
@@ -122,9 +158,12 @@ def upgrade() -> None:
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         deleted_at TIMESTAMPTZ
-    );
-
-    CREATE TABLE project.tasks (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.tasks (
         id UUID PRIMARY KEY,
         project_id UUID NOT NULL,
         iteration_id UUID,
@@ -141,9 +180,12 @@ def upgrade() -> None:
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         deleted_at TIMESTAMPTZ
-    );
-
-    CREATE TABLE project.bugs (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.bugs (
         id UUID PRIMARY KEY,
         project_id UUID NOT NULL,
         iteration_id UUID,
@@ -157,51 +199,69 @@ def upgrade() -> None:
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         deleted_at TIMESTAMPTZ
-    );
-
-    CREATE TABLE project.requirement_tasks (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.requirement_tasks (
         id UUID PRIMARY KEY,
         requirement_id UUID NOT NULL,
         task_id UUID NOT NULL,
         CONSTRAINT uq_req_task UNIQUE (requirement_id, task_id)
-    );
-
-    CREATE TABLE project.task_dependencies (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.task_dependencies (
         id UUID PRIMARY KEY,
         task_id UUID NOT NULL,
         depends_on_id UUID NOT NULL,
         type VARCHAR(20) NOT NULL DEFAULT 'blocks',
         CONSTRAINT uq_task_dep UNIQUE (task_id, depends_on_id)
-    );
-
-    CREATE TABLE project.boards (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.boards (
         id UUID PRIMARY KEY,
         project_id UUID NOT NULL,
         name VARCHAR(100) NOT NULL DEFAULT '默认看板',
         type VARCHAR(20) NOT NULL DEFAULT 'kanban',
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-
-    CREATE TABLE project.board_columns (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.board_columns (
         id UUID PRIMARY KEY,
         board_id UUID NOT NULL,
         name VARCHAR(100) NOT NULL,
         "order" INTEGER NOT NULL DEFAULT 0,
         wip_limit INTEGER,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-
-    CREATE TABLE project.board_swimlanes (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.board_swimlanes (
         id UUID PRIMARY KEY,
         board_id UUID NOT NULL,
         name VARCHAR(100) NOT NULL,
         type VARCHAR(20) NOT NULL DEFAULT 'none',
         "order" INTEGER NOT NULL DEFAULT 0,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-
-    CREATE TABLE project.board_cards (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.board_cards (
         id UUID PRIMARY KEY,
         board_id UUID NOT NULL,
         column_id UUID NOT NULL,
@@ -211,9 +271,12 @@ def upgrade() -> None:
         "order" INTEGER NOT NULL DEFAULT 0,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         CONSTRAINT uq_card_item UNIQUE (board_id, item_type, item_id)
-    );
-
-    CREATE TABLE project.labels (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.labels (
         id UUID PRIMARY KEY,
         project_id UUID NOT NULL,
         name VARCHAR(50) NOT NULL,
@@ -221,17 +284,22 @@ def upgrade() -> None:
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         deleted_at TIMESTAMPTZ
-    );
-
-    CREATE TABLE project.item_labels (
+    )
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE project.item_labels (
         id UUID PRIMARY KEY,
         label_id UUID NOT NULL,
         item_type VARCHAR(20) NOT NULL,
         item_id UUID NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         CONSTRAINT uq_label_item UNIQUE (label_id, item_type, item_id)
-    );
-    """)
+    )
+        """
+    )
+
 
 
 def downgrade() -> None:

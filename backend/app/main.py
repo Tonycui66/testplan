@@ -1,9 +1,13 @@
-from fastapi import FastAPI, Response
+import json
+from typing import Any, Dict
+
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.config import get_settings
-from app.core.exceptions import AppError
+from app.core.exceptions import AppError, ConflictError, NotFoundError
 from app.core.logging_config import configure_logging
 from app.core.redis_client import get_redis
 from app.dependencies import get_database_engine
@@ -12,6 +16,29 @@ from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_id import RequestIDMiddleware
 from app.modules.project.router import router as project_router
 from app.modules.user.router import router as user_router
+
+
+ERROR_CODES = {
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    409: "CONFLICT",
+    422: "VALIDATION_ERROR",
+    429: "RATE_LIMITED",
+    500: "INTERNAL_ERROR",
+}
+
+
+def error_response(status_code: int, code: str, message: str) -> JSONResponse:
+    return JSONResponse(status_code=status_code, content={"error": {"code": code, "message": message}})
+
+
+def app_error_code(exc: AppError) -> str:
+    if isinstance(exc, NotFoundError):
+        return "NOT_FOUND"
+    if isinstance(exc, ConflictError):
+        return "CONFLICT"
+    return "APPLICATION_ERROR"
 
 
 def create_app() -> FastAPI:
@@ -34,10 +61,43 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(AppError)
     async def app_error_handler(_, exc: AppError):
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"error": {"code": type(exc).__name__, "message": exc.message}},
-        )
+        return error_response(exc.status_code, app_error_code(exc), exc.message)
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(_, exc: HTTPException):
+        code = ERROR_CODES.get(exc.status_code, "APPLICATION_ERROR")
+        return error_response(exc.status_code, code, str(exc.detail))
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(_, exc: RequestValidationError):
+        return error_response(422, "VALIDATION_ERROR", "Request validation failed")
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(_, exc: Exception):
+        return error_response(500, "INTERNAL_ERROR", "Unexpected server error")
+
+    @app.middleware("http")
+    async def response_envelope(request: Request, call_next):
+        response = await call_next(request)
+        if not request.url.path.startswith("/api/v1") or response.status_code >= 400:
+            return response
+        content_type = response.headers.get("content-type", "")
+        if not content_type.startswith("application/json"):
+            return response
+        body = b"".join([chunk async for chunk in response.body_iterator])
+        if not body:
+            return response
+        try:
+            payload: Any = json.loads(body)
+        except Exception:
+            return response
+        if isinstance(payload, dict) and set(payload.keys()) == {"items", "meta"}:
+            wrapped: Dict[str, Any] = {"data": payload["items"], "meta": payload["meta"]}
+        else:
+            wrapped = {"data": payload}
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        return JSONResponse(content=wrapped, status_code=response.status_code, headers=headers)
 
     @app.get("/api/v1/health", tags=["health"])
     async def health(response: Response) -> dict:

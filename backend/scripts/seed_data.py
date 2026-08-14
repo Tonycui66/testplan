@@ -33,7 +33,7 @@ async def seed() -> None:
             text(
                 "INSERT INTO iam.users (id, email, password_hash, name, is_active, is_superadmin) "
                 "VALUES (:id, :email, :password_hash, :name, true, true) "
-                "ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id"
+                "ON CONFLICT DO NOTHING RETURNING id"
             ),
             {
                 "id": uuid4(),
@@ -42,7 +42,14 @@ async def seed() -> None:
                 "name": admin_name,
             },
         )
-        admin_id = result.scalar_one()
+        admin_id = result.scalar_one_or_none()
+        if admin_id is None:
+            admin_id = await conn.scalar(
+                text("SELECT id FROM iam.users WHERE email = :email"), {"email": admin_email}
+            )
+        if admin_id is None:
+            raise RuntimeError("Failed to seed administrator")
+
         await conn.execute(
             text(
                 "INSERT INTO iam.user_roles (id, user_id, role_id) VALUES (:id, :user_id, :role_id) "

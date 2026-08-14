@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
@@ -48,7 +48,7 @@ class TeamUpdate(BaseModel):
 
 class TeamMemberCreate(BaseModel):
     user_id: UUID
-    role: str = "member"
+    role: Literal["owner", "admin", "member"] = "member"
 
 
 class TeamResponse(BaseModel):
@@ -61,3 +61,8 @@ class TeamResponse(BaseModel):
 
 class LogoutRequest(BaseModel):
     refresh_token: Optional[str] = None
+
+class UserUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    avatar_url: Optional[str] = Field(default=None, max_length=500)
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)

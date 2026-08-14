@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -29,11 +29,11 @@ class ProjectResponse(BaseModel):
 
 class MemberCreate(BaseModel):
     user_id: UUID
-    role: str = "member"
+    role: Literal["owner", "member", "viewer"] = "member"
 
 
 class MemberUpdate(BaseModel):
-    role: str
+    role: Literal["owner", "member", "viewer"]
 
 
 class MemberResponse(BaseModel):
@@ -53,13 +53,13 @@ class IterationUpdate(BaseModel):
     goal: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    status: Optional[str] = None
+    status: Optional[Literal["planning", "active", "closed"]] = None
 
 
 class RequirementCreate(BaseModel):
     title: str
     description: Optional[str] = None
-    priority: str = "medium"
+    priority: Literal["low", "medium", "high", "critical"] = "medium"
     iteration_id: Optional[UUID] = None
     assignee_id: Optional[UUID] = None
 
@@ -67,8 +67,8 @@ class RequirementCreate(BaseModel):
 class TaskCreate(BaseModel):
     title: str
     description: Optional[str] = None
-    status: str = "todo"
-    priority: str = "medium"
+    status: Literal["todo", "in_progress", "review", "done", "closed"] = "todo"
+    priority: Literal["low", "medium", "high", "critical"] = "medium"
     assignee_id: Optional[UUID] = None
     requirement_id: Optional[UUID] = None
     iteration_id: Optional[UUID] = None
@@ -78,8 +78,8 @@ class TaskCreate(BaseModel):
 class BugCreate(BaseModel):
     title: str
     description: Optional[str] = None
-    severity: str = "medium"
-    priority: str = "medium"
+    severity: Literal["low", "medium", "high", "critical"] = "medium"
+    priority: Literal["low", "medium", "high", "critical"] = "medium"
     assignee_id: Optional[UUID] = None
     iteration_id: Optional[UUID] = None
 
@@ -96,8 +96,8 @@ class BoardColumnUpdate(BaseModel):
 class RequirementUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    status: Optional[str] = None
-    priority: Optional[str] = None
+    status: Optional[Literal["draft", "reviewing", "in_progress", "testing", "done", "closed"]] = None
+    priority: Optional[Literal["low", "medium", "high", "critical"]] = None
     assignee_id: Optional[UUID] = None
     iteration_id: Optional[UUID] = None
 
@@ -105,8 +105,8 @@ class RequirementUpdate(BaseModel):
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    status: Optional[str] = None
-    priority: Optional[str] = None
+    status: Optional[Literal["todo", "in_progress", "review", "done", "closed"]] = None
+    priority: Optional[Literal["low", "medium", "high", "critical"]] = None
     assignee_id: Optional[UUID] = None
     iteration_id: Optional[UUID] = None
     parent_id: Optional[UUID] = None
@@ -116,8 +116,18 @@ class BugUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     steps_to_reproduce: Optional[str] = None
-    severity: Optional[str] = None
-    priority: Optional[str] = None
-    status: Optional[str] = None
+    severity: Optional[Literal["low", "medium", "high", "critical"]] = None
+    priority: Optional[Literal["low", "medium", "high", "critical"]] = None
+    status: Optional[Literal["open", "in_progress", "resolved", "closed"]] = None
     assignee_id: Optional[UUID] = None
     iteration_id: Optional[UUID] = None
+
+class BoardCardCreate(BaseModel):
+    column_id: UUID
+    item_type: Literal["requirement", "task", "bug"]
+    item_id: UUID
+    order: int = 0
+
+class BoardCardUpdate(BaseModel):
+    column_id: Optional[UUID] = None
+    order: Optional[int] = None

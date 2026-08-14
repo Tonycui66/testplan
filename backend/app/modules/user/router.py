@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError
+from app.core.pagination import normalize_pagination
 from app.core.redis_client import get_redis
 from app.core.security import create_token, decode_token, hash_password, verify_password
 from app.dependencies import bearer_scheme, get_current_user, get_db, require_superadmin
@@ -24,6 +25,7 @@ from app.modules.user.schemas import (
     TeamUpdate,
     TokenResponse,
     UserResponse,
+    UserUpdate,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["iam"])
@@ -115,6 +117,19 @@ async def logout(
 
 @router.get("/auth/me", response_model=UserResponse)
 async def me(user: User = Depends(get_current_user)) -> UserResponse:
+    return user_to_response(user)
+
+
+@router.patch("/auth/me", response_model=UserResponse)
+async def update_me(payload: UserUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> UserResponse:
+    if payload.name is not None:
+        user.name = payload.name
+    if payload.avatar_url is not None:
+        user.avatar_url = payload.avatar_url
+    if payload.password is not None:
+        user.password_hash = hash_password(payload.password)
+    await db.commit()
+    await db.refresh(user)
     return user_to_response(user)
 
 
@@ -211,13 +226,16 @@ async def remove_team_member(team_id: UUID, user_id: UUID, db: AsyncSession = De
 @router.get("/admin/users", response_model=dict)
 async def list_admin_users(
     page: int = 1,
+    page_size: int = 20,
     search: str = "",
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_superadmin),
 ) -> Dict[str, Any]:
+    normalized_page, normalized_page_size = normalize_pagination(page, page_size)
     stmt = select(User)
     if search:
         stmt = stmt.where(or_(User.email.ilike(f"%{search}%"), User.name.ilike(f"%{search}%")))
-    offset = (max(page, 1) - 1) * 20
-    users = (await db.scalars(stmt.order_by(User.created_at.desc()).offset(offset).limit(20))).all()
-    return {"items": [user_to_response(user).model_dump() for user in users], "meta": {"page": page, "page_size": 20}}
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    offset = (normalized_page - 1) * normalized_page_size
+    users = (await db.scalars(stmt.order_by(User.created_at.desc()).offset(offset).limit(normalized_page_size))).all()
+    return {"items": [user_to_response(user).model_dump() for user in users], "meta": {"page": normalized_page, "page_size": normalized_page_size, "total": total}}

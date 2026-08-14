@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, String, Text, UniqueConstraint, func
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
 
@@ -21,8 +21,6 @@ class User(Base, UUIDMixin, TimestampMixin):
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
-    roles = relationship("UserRole", back_populates="user")
-    teams = relationship("TeamMember", back_populates="user")
 
 
 class Role(Base, UUIDMixin, TimestampMixin):
@@ -45,7 +43,6 @@ class UserRole(Base, UUIDMixin):
     role_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    user = relationship("User", back_populates="roles")
 
 
 class Team(Base, UUIDMixin, TimestampMixin):
@@ -56,7 +53,6 @@ class Team(Base, UUIDMixin, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text)
     created_by: Mapped[uuid.UUID] = mapped_column(nullable=False)
 
-    members = relationship("TeamMember", back_populates="team")
 
 
 class TeamMember(Base, UUIDMixin):
@@ -71,8 +67,6 @@ class TeamMember(Base, UUIDMixin):
     role: Mapped[str] = mapped_column(String(20), default="member", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    team = relationship("Team", back_populates="members")
-    user = relationship("User", back_populates="teams")
 
 
 class UserOAuthToken(Base, UUIDMixin):

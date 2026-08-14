@@ -7,9 +7,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError
+from app.core.pagination import normalize_pagination
 from app.dependencies import get_current_user, get_db, require_project_access
 from app.modules.project import models as pm
 from app.modules.project.schemas import (
+    BoardCardCreate,
+    BoardCardUpdate,
     BoardColumnCreate,
     BoardColumnUpdate,
     BugCreate,
@@ -45,6 +48,14 @@ async def require_owner(project_id: UUID, user: User, db: AsyncSession) -> None:
     if member is None or (member.role != "owner" and not user.is_superadmin):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Owner permission required")
 
+def pagination_meta(page: int, page_size: int, total: int) -> Dict[str, Any]:
+    normalized_page, normalized_page_size = normalize_pagination(page, page_size)
+    return {"page": normalized_page, "page_size": normalized_page_size, "total": total}
+
+
+async def count_rows(db: AsyncSession, stmt) -> int:
+    return await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+
 
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> ProjectResponse:
@@ -58,7 +69,7 @@ async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_
     board = pm.Board(project_id=project.id, name="默认看板", type="kanban")
     db.add_all([member, board])
     await db.flush()
-    await db.add_all(
+    db.add_all(
         [
             pm.BoardColumn(board_id=board.id, name="待办", order=0),
             pm.BoardColumn(board_id=board.id, name="进行中", order=1),
@@ -71,7 +82,8 @@ async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_
 
 
 @router.get("", response_model=dict)
-async def list_projects(page: int = 1, search: str = "", db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
+async def list_projects(page: int = 1, page_size: int = 20, search: str = "", db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
+    normalized_page, normalized_page_size = normalize_pagination(page, page_size)
     stmt = (
         select(pm.Project)
         .join(pm.ProjectMember, pm.ProjectMember.project_id == pm.Project.id)
@@ -79,10 +91,10 @@ async def list_projects(page: int = 1, search: str = "", db: AsyncSession = Depe
     )
     if search:
         stmt = stmt.where(pm.Project.name.ilike(f"%{search}%"))
-    total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-    offset = (max(page, 1) - 1) * min(max(20, 1), 100)
-    projects = (await db.scalars(stmt.order_by(pm.Project.created_at.desc()).offset(offset).limit(20))).all()
-    return {"items": [project_response(p).model_dump() for p in projects], "meta": {"page": page, "page_size": 20, "total": total}}
+    total = await count_rows(db, stmt)
+    offset = (normalized_page - 1) * normalized_page_size
+    projects = (await db.scalars(stmt.order_by(pm.Project.created_at.desc()).offset(offset).limit(normalized_page_size))).all()
+    return {"items": [project_response(p).model_dump() for p in projects], "meta": pagination_meta(normalized_page, normalized_page_size, total)}
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
@@ -94,7 +106,8 @@ async def get_project(project_id: UUID, db: AsyncSession = Depends(get_db), _: U
 
 
 @router.patch("/{project_id}", response_model=ProjectResponse)
-async def update_project(project_id: UUID, payload: ProjectUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> ProjectResponse:
+async def update_project(project_id: UUID, payload: ProjectUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> ProjectResponse:
+    await require_owner(project_id, user, db)
     project = await db.get(pm.Project, project_id)
     if project is None or project.deleted_at is not None:
         raise NotFoundError("Project not found")
@@ -118,9 +131,13 @@ async def delete_project(project_id: UUID, db: AsyncSession = Depends(get_db), u
 
 
 @router.get("/{project_id}/members", response_model=dict)
-async def list_members(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
-    rows = (await db.scalars(select(pm.ProjectMember).where(pm.ProjectMember.project_id == project_id))).all()
-    return {"items": [MemberResponse(user_id=row.user_id, role=row.role).model_dump() for row in rows]}
+async def list_members(project_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    normalized_page, normalized_page_size = normalize_pagination(page, page_size)
+    stmt = select(pm.ProjectMember).where(pm.ProjectMember.project_id == project_id)
+    total = await count_rows(db, stmt)
+    offset = (normalized_page - 1) * normalized_page_size
+    rows = (await db.scalars(stmt.order_by(pm.ProjectMember.created_at.desc()).offset(offset).limit(normalized_page_size))).all()
+    return {"items": [MemberResponse(user_id=row.user_id, role=row.role).model_dump() for row in rows], "meta": pagination_meta(normalized_page, normalized_page_size, total)}
 
 
 @router.post("/{project_id}/members", response_model=MemberResponse)
@@ -166,9 +183,13 @@ async def create_iteration(project_id: UUID, payload: IterationCreate, db: Async
 
 
 @router.get("/{project_id}/iterations", response_model=dict)
-async def list_iterations(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
-    rows = (await db.scalars(select(pm.Iteration).where(pm.Iteration.project_id == project_id, pm.Iteration.deleted_at.is_(None)))).all()
-    return {"items": [{"id": r.id, "name": r.name, "status": r.status} for r in rows]}
+async def list_iterations(project_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    normalized_page, normalized_page_size = normalize_pagination(page, page_size)
+    stmt = select(pm.Iteration).where(pm.Iteration.project_id == project_id, pm.Iteration.deleted_at.is_(None))
+    total = await count_rows(db, stmt)
+    offset = (normalized_page - 1) * normalized_page_size
+    rows = (await db.scalars(stmt.order_by(pm.Iteration.created_at.desc()).offset(offset).limit(normalized_page_size))).all()
+    return {"items": [{"id": r.id, "name": r.name, "status": r.status} for r in rows], "meta": pagination_meta(normalized_page, normalized_page_size, total)}
 
 
 @router.patch("/{project_id}/iterations/{iteration_id}")
@@ -201,9 +222,13 @@ async def create_requirement(project_id: UUID, payload: RequirementCreate, db: A
 
 
 @router.get("/{project_id}/requirements", response_model=dict)
-async def list_requirements(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
-    rows = (await db.scalars(select(pm.Requirement).where(pm.Requirement.project_id == project_id, pm.Requirement.deleted_at.is_(None)))).all()
-    return {"items": [{"id": r.id, "title": r.title, "status": r.status, "priority": r.priority} for r in rows]}
+async def list_requirements(project_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    normalized_page, normalized_page_size = normalize_pagination(page, page_size)
+    stmt = select(pm.Requirement).where(pm.Requirement.project_id == project_id, pm.Requirement.deleted_at.is_(None))
+    total = await count_rows(db, stmt)
+    offset = (normalized_page - 1) * normalized_page_size
+    rows = (await db.scalars(stmt.order_by(pm.Requirement.created_at.desc()).offset(offset).limit(normalized_page_size))).all()
+    return {"items": [{"id": r.id, "title": r.title, "status": r.status, "priority": r.priority} for r in rows], "meta": pagination_meta(normalized_page, normalized_page_size, total)}
 
 
 @router.get("/{project_id}/requirements/{requirement_id}")
@@ -246,9 +271,13 @@ async def create_task(project_id: UUID, payload: TaskCreate, db: AsyncSession = 
 
 
 @router.get("/{project_id}/tasks", response_model=dict)
-async def list_tasks(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
-    rows = (await db.scalars(select(pm.Task).where(pm.Task.project_id == project_id, pm.Task.deleted_at.is_(None)))).all()
-    return {"items": [{"id": r.id, "title": r.title, "status": r.status, "priority": r.priority} for r in rows]}
+async def list_tasks(project_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    normalized_page, normalized_page_size = normalize_pagination(page, page_size)
+    stmt = select(pm.Task).where(pm.Task.project_id == project_id, pm.Task.deleted_at.is_(None))
+    total = await count_rows(db, stmt)
+    offset = (normalized_page - 1) * normalized_page_size
+    rows = (await db.scalars(stmt.order_by(pm.Task.created_at.desc()).offset(offset).limit(normalized_page_size))).all()
+    return {"items": [{"id": r.id, "title": r.title, "status": r.status, "priority": r.priority} for r in rows], "meta": pagination_meta(normalized_page, normalized_page_size, total)}
 
 
 @router.get("/{project_id}/tasks/{task_id}")
@@ -288,9 +317,13 @@ async def create_bug(project_id: UUID, payload: BugCreate, db: AsyncSession = De
 
 
 @router.get("/{project_id}/bugs", response_model=dict)
-async def list_bugs(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
-    rows = (await db.scalars(select(pm.Bug).where(pm.Bug.project_id == project_id, pm.Bug.deleted_at.is_(None)))).all()
-    return {"items": [{"id": r.id, "title": r.title, "severity": r.severity, "status": r.status} for r in rows]}
+async def list_bugs(project_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    normalized_page, normalized_page_size = normalize_pagination(page, page_size)
+    stmt = select(pm.Bug).where(pm.Bug.project_id == project_id, pm.Bug.deleted_at.is_(None))
+    total = await count_rows(db, stmt)
+    offset = (normalized_page - 1) * normalized_page_size
+    rows = (await db.scalars(stmt.order_by(pm.Bug.created_at.desc()).offset(offset).limit(normalized_page_size))).all()
+    return {"items": [{"id": r.id, "title": r.title, "severity": r.severity, "status": r.status} for r in rows], "meta": pagination_meta(normalized_page, normalized_page_size, total)}
 
 
 @router.get("/{project_id}/bugs/{bug_id}")
@@ -356,3 +389,46 @@ async def update_board_column(project_id: UUID, column_id: UUID, payload: BoardC
         column.order = payload.order
     await db.commit()
     return {"id": column.id, "name": column.name, "order": column.order}
+
+
+@router.delete("/{project_id}/board/columns/{column_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_board_column(project_id: UUID, column_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> None:
+    column = await db.get(pm.BoardColumn, column_id)
+    if column is None:
+        raise NotFoundError("Board column not found")
+    await db.delete(column)
+    await db.commit()
+
+
+@router.post("/{project_id}/board/cards", status_code=status.HTTP_201_CREATED)
+async def create_board_card(project_id: UUID, payload: BoardCardCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    board = await db.scalar(select(pm.Board).where(pm.Board.project_id == project_id))
+    if board is None:
+        raise NotFoundError("Board not found")
+    card = pm.BoardCard(board_id=board.id, **payload.model_dump())
+    db.add(card)
+    await db.commit()
+    await db.refresh(card)
+    return {"id": card.id, "column_id": card.column_id, "item_type": card.item_type, "item_id": card.item_id, "order": card.order}
+
+
+@router.patch("/{project_id}/board/cards/{card_id}")
+async def update_board_card(project_id: UUID, card_id: UUID, payload: BoardCardUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    card = await db.get(pm.BoardCard, card_id)
+    if card is None:
+        raise NotFoundError("Board card not found")
+    if payload.column_id is not None:
+        card.column_id = payload.column_id
+    if payload.order is not None:
+        card.order = payload.order
+    await db.commit()
+    return {"id": card.id, "column_id": card.column_id, "item_type": card.item_type, "item_id": card.item_id, "order": card.order}
+
+
+@router.delete("/{project_id}/board/cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_board_card(project_id: UUID, card_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> None:
+    card = await db.get(pm.BoardCard, card_id)
+    if card is None:
+        raise NotFoundError("Board card not found")
+    await db.delete(card)
+    await db.commit()

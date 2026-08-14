@@ -15,9 +15,9 @@ def test_health_ok(client, monkeypatch) -> None:
 
     response = client.get("/api/v1/health")
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
-    assert response.json()["checks"]["database"] == "ok"
-    assert response.json()["checks"]["redis"] == "ok"
+    assert response.json()["data"]["status"] == "ok"
+    assert response.json()["data"]["checks"]["database"] == "ok"
+    assert response.json()["data"]["checks"]["redis"] == "ok"
 
 
 def test_health_degraded_when_database_fails(client, monkeypatch) -> None:

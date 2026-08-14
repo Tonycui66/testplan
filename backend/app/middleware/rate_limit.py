@@ -18,6 +18,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         window = [hit for hit in self._hits[client] if now - hit < 60]
         self._hits[client] = window
         if len(window) >= self.requests_per_minute:
-            return JSONResponse({"error": {"code": "rate_limited", "message": "Too many requests"}}, status_code=429)
+            return JSONResponse({"error": {"code": "RATE_LIMITED", "message": "Too many requests"}}, status_code=429)
         self._hits[client].append(now)
         return await call_next(request)
