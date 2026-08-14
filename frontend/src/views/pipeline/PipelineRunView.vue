@@ -4,11 +4,12 @@ import LogViewer from '../../components/pipeline/LogViewer.vue'
 
 const route = useRoute()
 const runId = String(route.params.rid)
+const pipelineId = String(route.params.pid)
 </script>
 
 <template>
   <section>
     <h1>流水线执行详情</h1>
-    <LogViewer :run-id="runId" />
+    <LogViewer :run-id="runId" :pipeline-id="pipelineId" />
   </section>
 </template>

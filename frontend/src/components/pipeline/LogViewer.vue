@@ -2,8 +2,10 @@
 import { computed } from 'vue'
 import { useWebSocket } from '../../composables/useWebSocket'
 
-const props = defineProps<{ runId: string }>()
-const { messages, connected, error } = useWebSocket(`/ws/pipelines/${props.runId}/logs`)
+const props = defineProps<{ runId: string; pipelineId: string }>()
+const { messages, connected, error } = useWebSocket(
+  `/ws/pipelines/${props.pipelineId}/runs/${props.runId}/logs`
+)
 
 const parsed = computed(() => {
   return messages.value.map((line) => {

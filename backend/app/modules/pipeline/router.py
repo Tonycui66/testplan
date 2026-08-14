@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime, timezone
+import time
 from typing import Any, Dict, Optional
 from uuid import UUID
 
@@ -122,7 +123,7 @@ async def delete_pipeline(project_id: UUID, pipeline_id: UUID, db: AsyncSession 
     await db.commit()
 
 
-@router.post("/{pipeline_id}/run", status_code=status.HTTP_201_CREATED)
+@router.post("/{pipeline_id}/run", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_run(project_id: UUID, pipeline_id: UUID, payload: RunCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
     await require_owner_or_admin(project_id, user, db)
     pipeline = await get_pipeline(project_id, pipeline_id, db)
@@ -200,12 +201,25 @@ async def cancel_run(project_id: UUID, pipeline_id: UUID, run_id: UUID, db: Asyn
         raise ConflictError("Run is already finished")
     run.status = "cancelled"
     run.finished_at = datetime.now(timezone.utc)
-    await db.commit()
+    await mark_run_cancelled(db, run.id)
     return {"id": run.id, "status": run.status}
 
 
-@ws_router.websocket("/pipelines/{run_id}/logs")
-async def pipeline_logs(websocket: WebSocket, run_id: UUID) -> None:
+
+async def mark_run_cancelled(db: AsyncSession, run_id: UUID) -> None:
+    stage_runs = (await db.scalars(select(pm.StageRun).where(pm.StageRun.run_id == run_id))).all()
+    for stage_run in stage_runs:
+        if stage_run.status not in {"success", "failed", "cancelled", "skipped"}:
+            stage_run.status = "cancelled"
+            stage_run.finished_at = datetime.now(timezone.utc)
+    job_runs = (await db.scalars(select(pm.JobRun).join(pm.StageRun, pm.JobRun.stage_run_id == pm.StageRun.id).where(pm.StageRun.run_id == run_id))).all()
+    for job_run in job_runs:
+        if job_run.status not in {"success", "failed", "cancelled", "skipped"}:
+            job_run.status = "cancelled"
+            job_run.finished_at = datetime.now(timezone.utc)
+
+@ws_router.websocket("/pipelines/{pipeline_id}/runs/{run_id}/logs")
+async def pipeline_logs(websocket: WebSocket, pipeline_id: UUID, run_id: UUID) -> None:
     token = websocket.query_params.get("token") or websocket.headers.get("authorization", "").removeprefix("Bearer ")
     subject = decode_access_token(token) if token else None
     if not subject:
@@ -214,7 +228,7 @@ async def pipeline_logs(websocket: WebSocket, run_id: UUID) -> None:
     session_factory = get_session_factory()
     async with session_factory() as db:
         run = await db.get(pm.PipelineRun, run_id)
-        if run is None:
+        if run is None or run.pipeline_id != pipeline_id:
             await websocket.close(code=1008)
             return
         pipeline = await db.get(pm.Pipeline, run.pipeline_id)
@@ -228,15 +242,35 @@ async def pipeline_logs(websocket: WebSocket, run_id: UUID) -> None:
             return
     await websocket.accept()
     redis = get_redis()
+    async with session_factory() as db:
+        history = (await db.scalars(
+            select(pm.JobLog)
+            .join(pm.JobRun, pm.JobLog.job_run_id == pm.JobRun.id)
+            .join(pm.StageRun, pm.JobRun.stage_run_id == pm.StageRun.id)
+            .where(pm.StageRun.run_id == run_id)
+            .order_by(pm.JobLog.line_number)
+        )).all()
+        for log in history:
+            await websocket.send_text(json.dumps({"stream": log.stream, "content": log.content, "timestamp": log.timestamp.isoformat()}))
     pubsub = redis.pubsub()
     await pubsub.subscribe(f"logs:{run_id}")
+    last_heartbeat = time.monotonic()
+    last_client = time.monotonic()
     try:
         while True:
+            now = time.monotonic()
+            if now - last_heartbeat >= 30:
+                await websocket.send_text("pong")
+                last_heartbeat = now
+            if now - last_client >= 300:
+                await websocket.close(code=1001)
+                break
             message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.25)
             if message and message.get("type") == "message":
                 await websocket.send_text(message["data"])
             try:
                 client_message = await asyncio.wait_for(websocket.receive_text(), timeout=0.25)
+                last_client = time.monotonic()
                 if client_message == "ping":
                     await websocket.send_text("pong")
             except asyncio.TimeoutError:

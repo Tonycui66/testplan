@@ -49,3 +49,10 @@ from app.modules.pipeline.schemas import PipelineUpdate
 def test_pipeline_update_accepts_stages() -> None:
     payload = PipelineUpdate(stages=[StageInput(name="Cleanup", condition="on_failure", jobs=[])])
     assert payload.stages[0].condition == "on_failure"
+
+from app.main import app
+
+
+def test_phase2_websocket_contract_path_exists() -> None:
+    paths = {route.path for route in app.routes}
+    assert "/api/v1/ws/pipelines/{pipeline_id}/runs/{run_id}/logs" in paths

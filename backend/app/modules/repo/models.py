@@ -30,6 +30,7 @@ class WebhookEvent(Base, UUIDMixin):
     connection_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
     payload: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    dedupe_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     processed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
