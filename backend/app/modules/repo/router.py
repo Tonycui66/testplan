@@ -119,6 +119,16 @@ async def receive_webhook(provider: str, payload: WebhookEventCreate, request: R
     if event_id is None:
         existing = await db.scalar(select(rm.WebhookEvent).where(rm.WebhookEvent.connection_id == connection.id, rm.WebhookEvent.dedupe_key == dedupe_key))
         if existing is not None:
+            if "enqueue_error" in existing.payload:
+                try:
+                    await get_redis().rpush("queue:webhook", json.dumps({"event_id": str(existing.id), "connection_id": str(connection.id), "payload": payload.payload}))
+                    existing.payload = {key: value for key, value in existing.payload.items() if key != "enqueue_error"}
+                    await db.commit()
+                    return {"id": existing.id, "event_type": existing.event_type, "processed": existing.processed, "queued": True, "duplicate": True, "retried": True}
+                except Exception as exc:
+                    existing.payload = {**existing.payload, "enqueue_error": str(exc)}
+                    await db.commit()
+                    return {"id": existing.id, "event_type": existing.event_type, "processed": existing.processed, "queued": False, "duplicate": True, "retried": False}
             return {"id": existing.id, "event_type": existing.event_type, "processed": existing.processed, "queued": True, "duplicate": True}
     event_id = event_id or existing.id
     queued = True

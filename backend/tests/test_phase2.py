@@ -69,3 +69,8 @@ def test_log_message_id_parses_persisted_job_log_id() -> None:
 
 def test_log_message_id_handles_non_json() -> None:
     assert log_message_id("not-json") is None
+
+
+def test_log_message_id_handles_non_object_json() -> None:
+    assert log_message_id('"hello"') is None
+    assert log_message_id('[1,2,3]') is None

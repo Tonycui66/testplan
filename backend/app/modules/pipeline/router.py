@@ -225,6 +225,8 @@ def log_message_id(data: str) -> Optional[str]:
         payload = json.loads(data)
     except Exception:
         return None
+    if not isinstance(payload, dict):
+        return None
     value = payload.get("id")
     return str(value) if value else None
 
