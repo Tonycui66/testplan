@@ -106,7 +106,7 @@ async def update_case(project_id: UUID, case_id: UUID, payload: CaseUpdate, db: 
     suite = await db.get(tm.TestSuite, case.suite_id) if case else None
     if case is None or suite is None or suite.project_id != project_id:
         raise NotFoundError("Test case not found")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    for key, value in payload.model_dump(exclude_unset=True, exclude_none=True).items():
         setattr(case, key, value)
     await db.commit()
     return {"id": case.id, "title": case.title}

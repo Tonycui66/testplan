@@ -80,3 +80,9 @@ from app.modules.test.schemas import CaseUpdate
 def test_case_update_rejects_null_steps_or_expected() -> None:
     with pytest.raises(ValidationError):
         CaseUpdate(steps="", expected="")
+
+
+def test_case_update_explicit_none_is_dropped() -> None:
+    payload = CaseUpdate(steps=None, expected=None)
+    assert "steps" not in payload.model_dump(exclude_unset=True, exclude_none=True)
+    assert "expected" not in payload.model_dump(exclude_unset=True, exclude_none=True)
