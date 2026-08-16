@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.config import get_settings
-from app.core.exceptions import AppError, ConflictError, NotFoundError
+from app.core.exceptions import AppError
 from app.core.logging_config import configure_logging
 from app.core.redis_client import get_redis
 from app.dependencies import get_database_engine
@@ -28,6 +28,7 @@ ERROR_CODES = {
     403: "FORBIDDEN",
     404: "NOT_FOUND",
     409: "CONFLICT",
+    413: "PAYLOAD_TOO_LARGE",
     422: "VALIDATION_ERROR",
     429: "RATE_LIMITED",
     500: "INTERNAL_ERROR",
@@ -39,11 +40,7 @@ def error_response(status_code: int, code: str, message: str) -> JSONResponse:
 
 
 def app_error_code(exc: AppError) -> str:
-    if isinstance(exc, NotFoundError):
-        return "NOT_FOUND"
-    if isinstance(exc, ConflictError):
-        return "CONFLICT"
-    return "APPLICATION_ERROR"
+    return ERROR_CODES.get(exc.status_code, "APPLICATION_ERROR")
 
 
 def create_app() -> FastAPI:

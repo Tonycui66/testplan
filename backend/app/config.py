@@ -17,6 +17,12 @@ class Settings:
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
     refresh_token_expire_days: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
+    artifact_storage_root: str = os.getenv("ARTIFACT_STORAGE_ROOT", "/var/artifacts")
+    artifact_max_size_bytes: int = int(os.getenv("ARTIFACT_MAX_SIZE_BYTES", str(100 * 1024 * 1024)))
+    artifact_allowed_content_types: str = os.getenv(
+        "ARTIFACT_ALLOWED_CONTENT_TYPES",
+        "application/gzip,application/x-gzip,application/zip,application/x-tar,application/octet-stream",
+    )
 
 
 @lru_cache

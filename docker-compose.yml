@@ -38,6 +38,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       JWT_SECRET: ${JWT_SECRET:-dev-secret}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ARTIFACT_STORAGE_ROOT: /var/artifacts
+      ARTIFACT_MAX_SIZE_BYTES: ${ARTIFACT_MAX_SIZE_BYTES:-104857600}
     ports:
       - "8000:8000"
     volumes:
