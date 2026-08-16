@@ -54,3 +54,12 @@ def test_deploy_config_requires_typed_credential_ref() -> None:
     assert ssh.credential_ref == "cred-1"
     k8s = K8sConfig(cluster_ref="cluster-a", credential_ref="cred-2")
     assert k8s.namespace is None
+
+
+def test_artifact_rejects_dot_segments() -> None:
+    with pytest.raises(ValidationError):
+        ArtifactCreate(name=".", version="x", size_bytes=1)
+    with pytest.raises(ValidationError):
+        ArtifactCreate(name="..", version="x", size_bytes=1)
+    with pytest.raises(ValidationError):
+        ArtifactCreate(name="app", version="..", size_bytes=1)
