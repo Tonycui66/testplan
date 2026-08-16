@@ -152,19 +152,34 @@ async def process_deploy_task(task_id: str) -> None:
         await db.commit()
 
 
+async def pop_job(redis):
+    return await redis.blpop(("queue:pipeline", "queue:deploy"), timeout=1)
+
+
+async def dispatch_job(redis, message) -> None:
+    if message is None:
+        return
+    queue_name = message[0]
+    if queue_name == "queue:pipeline":
+        await process_run(json.loads(message[1]))
+    elif queue_name == "queue:deploy":
+        await process_deploy_task(json.loads(message[1]).get("task_id", ""))
+
+
+async def consume_once(redis) -> bool:
+    message = await pop_job(redis)
+    if message is None:
+        return False
+    await dispatch_job(redis, message)
+    return True
+
+
 async def main() -> None:
     configure_logging()
     redis = get_redis()
     while True:
-        message = await redis.blpop("queue:pipeline", "queue:deploy", timeout=1)
-        if message is None:
-            continue
-        queue_name = message[0]
         try:
-            if queue_name == "queue:pipeline":
-                await process_run(json.loads(message[1]))
-            else:
-                await process_deploy_task(json.loads(message[1]).get("task_id", ""))
+            await consume_once(redis)
         except Exception:
             continue
 
