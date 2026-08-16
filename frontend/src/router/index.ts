@@ -6,6 +6,9 @@ import ProjectListView from '../views/project/ProjectListView.vue'
 import PipelineEditView from '../views/pipeline/PipelineEditView.vue'
 import PipelineListView from '../views/pipeline/PipelineListView.vue'
 import PipelineRunView from '../views/pipeline/PipelineRunView.vue'
+import ArtifactRepositoryListView from '../views/artifact/ArtifactRepositoryListView.vue'
+import EnvironmentListView from '../views/deploy/EnvironmentListView.vue'
+import TestSuiteListView from '../views/test/TestSuiteListView.vue'
 import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
@@ -42,6 +45,24 @@ const router = createRouter({
       component: AppLayout,
       meta: { requiresAuth: true },
       children: [{ path: '', name: 'pipeline-run', component: PipelineRunView }]
+    },
+    {
+      path: '/projects/:id/tests/suites',
+      component: AppLayout,
+      meta: { requiresAuth: true },
+      children: [{ path: '', name: 'test-suites', component: TestSuiteListView }]
+    },
+    {
+      path: '/projects/:id/deploy/environments',
+      component: AppLayout,
+      meta: { requiresAuth: true },
+      children: [{ path: '', name: 'deploy-environments', component: EnvironmentListView }]
+    },
+    {
+      path: '/projects/:id/artifacts',
+      component: AppLayout,
+      meta: { requiresAuth: true },
+      children: [{ path: '', name: 'artifact-repositories', component: ArtifactRepositoryListView }]
     }
   ]
 })
