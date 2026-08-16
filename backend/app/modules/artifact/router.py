@@ -3,6 +3,7 @@ from typing import Any, Dict
 from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy import func, select
+from app.core.pagination import normalize_pagination
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_current_user, get_db, require_project_access
 from app.modules.artifact import models as am
@@ -20,9 +21,12 @@ async def create_repository(project_id: UUID, payload: RepositoryCreate, db: Asy
     return {"id": repo.id, "name": repo.name, "type": repo.type}
 
 @router.get("/repositories", response_model=dict)
-async def list_repositories(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
-    rows = (await db.scalars(select(am.ArtifactRepository).where(am.ArtifactRepository.project_id == project_id))).all()
-    return {"items": [{"id": r.id, "name": r.name, "type": r.type} for r in rows], "meta": {"total": len(rows)}}
+async def list_repositories(project_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    normalized_page, normalized_page_size = normalize_pagination(page, page_size)
+    stmt = select(am.ArtifactRepository).where(am.ArtifactRepository.project_id == project_id)
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = (await db.scalars(stmt.order_by(am.ArtifactRepository.created_at.desc()).offset((normalized_page - 1) * normalized_page_size).limit(normalized_page_size))).all()
+    return {"items": [{"id": r.id, "name": r.name, "type": r.type} for r in rows], "meta": {"page": normalized_page, "page_size": normalized_page_size, "total": total}}
 
 @router.post("/repositories/{repository_id}/artifacts", status_code=status.HTTP_201_CREATED)
 async def upload_artifact(project_id: UUID, repository_id: UUID, payload: ArtifactCreate, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
@@ -32,7 +36,10 @@ async def upload_artifact(project_id: UUID, repository_id: UUID, payload: Artifa
         raise NotFoundError("Artifact repository not found")
     data = payload.model_dump()
     metadata = data.pop("metadata", {})
-    artifact = am.Artifact(repository_id=repository_id, artifact_metadata=metadata, **data)
+    storage_path = data.pop("storage_path", None)
+    if not storage_path:
+        storage_path = f"{project_id}/{repository_id}/{data['name']}/{data['version']}"
+    artifact = am.Artifact(repository_id=repository_id, storage_path=storage_path, artifact_metadata=metadata, **data)
     db.add(artifact)
     await db.commit()
     await db.refresh(artifact)
