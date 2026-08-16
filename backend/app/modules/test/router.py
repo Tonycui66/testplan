@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends, status
 from datetime import datetime, timezone
 from sqlalchemy import func, select
 from app.core.pagination import normalize_pagination
+from app.modules.deploy import models as deploy_models
 from app.modules.project import models as project_models
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_current_user, get_db, require_project_access
 from app.modules.test import models as tm
@@ -88,12 +89,15 @@ async def delete_suite(project_id: UUID, suite_id: UUID, db: AsyncSession = Depe
 
 
 @router.get("/cases", response_model=dict)
-async def list_cases(project_id: UUID, suite_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+async def list_cases(project_id: UUID, suite_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     suite = await db.get(tm.TestSuite, suite_id)
     if suite is None or suite.project_id != project_id:
         raise NotFoundError("Test suite not found")
-    rows = (await db.scalars(select(tm.TestCase).where(tm.TestCase.suite_id == suite_id))).all()
-    return {"items": [{"id": c.id, "title": c.title, "priority": c.priority, "type": c.type} for c in rows], "meta": {"total": len(rows)}}
+    normalized_page, normalized_page_size = normalize_pagination(page, page_size)
+    stmt = select(tm.TestCase).where(tm.TestCase.suite_id == suite_id)
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = (await db.scalars(stmt.order_by(tm.TestCase.created_at.desc()).offset((normalized_page - 1) * normalized_page_size).limit(normalized_page_size))).all()
+    return {"items": [{"id": c.id, "title": c.title, "priority": c.priority, "type": c.type} for c in rows], "meta": {"page": normalized_page, "page_size": normalized_page_size, "total": total}}
 
 
 @router.patch("/cases/{case_id}")
@@ -119,9 +123,12 @@ async def delete_case(project_id: UUID, case_id: UUID, db: AsyncSession = Depend
 
 
 @router.get("/plans", response_model=dict)
-async def list_plans(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
-    rows = (await db.scalars(select(tm.TestPlan).where(tm.TestPlan.project_id == project_id))).all()
-    return {"items": [{"id": p.id, "name": p.name, "status": p.status} for p in rows], "meta": {"total": len(rows)}}
+async def list_plans(project_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+    normalized_page, normalized_page_size = normalize_pagination(page, page_size)
+    stmt = select(tm.TestPlan).where(tm.TestPlan.project_id == project_id)
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = (await db.scalars(stmt.order_by(tm.TestPlan.created_at.desc()).offset((normalized_page - 1) * normalized_page_size).limit(normalized_page_size))).all()
+    return {"items": [{"id": p.id, "name": p.name, "status": p.status} for p in rows], "meta": {"page": normalized_page, "page_size": normalized_page_size, "total": total}}
 
 
 @router.post("/runs", status_code=status.HTTP_202_ACCEPTED)
@@ -129,6 +136,10 @@ async def create_run(project_id: UUID, payload: RunCreate, db: AsyncSession = De
     plan = await db.get(tm.TestPlan, payload.plan_id)
     if plan is None or plan.project_id != project_id:
         raise NotFoundError("Test plan not found")
+    if payload.environment_id is not None:
+        environment = await db.get(deploy_models.Environment, payload.environment_id)
+        if environment is None or environment.project_id != project_id:
+            raise NotFoundError("Environment not found")
     run = tm.TestRun(plan_id=plan.id, environment_id=payload.environment_id, started_by=user.id, status="pending", started_at=datetime.now(timezone.utc))
     db.add(run)
     await db.commit()
@@ -152,6 +163,12 @@ async def submit_result(project_id: UUID, run_id: UUID, payload: ResultCreate, d
     plan = await db.get(tm.TestPlan, run.plan_id) if run else None
     if run is None or plan is None or plan.project_id != project_id:
         raise NotFoundError("Test run not found")
+    plan_case = await db.scalar(select(tm.TestPlanCase).where(tm.TestPlanCase.plan_id == plan.id, tm.TestPlanCase.case_id == payload.case_id))
+    if plan_case is None:
+        raise NotFoundError("Test case is not part of the plan")
+    existing = await db.scalar(select(tm.TestRunResult).where(tm.TestRunResult.run_id == run.id, tm.TestRunResult.case_id == payload.case_id))
+    if existing is not None:
+        raise ConflictError("Test result already exists")
     result = tm.TestRunResult(run_id=run.id, case_id=payload.case_id, status=payload.status, comment=payload.comment, executed_by=user.id, executed_at=datetime.now(timezone.utc))
     db.add(result)
     await db.commit()

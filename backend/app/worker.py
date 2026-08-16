@@ -144,6 +144,9 @@ async def process_deploy_task(task_id: str) -> None:
         task.started_at = datetime.now(timezone.utc)
         await db.commit()
         await asyncio.sleep(0.1)
+        await db.refresh(task)
+        if task.status == "cancelled":
+            return
         task.status = "success"
         task.finished_at = datetime.now(timezone.utc)
         await db.commit()
@@ -156,7 +159,7 @@ async def main() -> None:
         message = await redis.blpop("queue:pipeline", "queue:deploy", timeout=1)
         if message is None:
             continue
-        queue_name = message[0].decode()
+        queue_name = message[0]
         try:
             if queue_name == "queue:pipeline":
                 await process_run(json.loads(message[1]))

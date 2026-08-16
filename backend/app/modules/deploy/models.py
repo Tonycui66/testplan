@@ -52,6 +52,7 @@ class SshCredential(Base, UUIDMixin):
     __tablename__ = "ssh_credentials"
     __table_args__ = {"schema": "deploy"}
 
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     host: Mapped[str] = mapped_column(String(255), nullable=False)
     port: Mapped[int] = mapped_column(Integer, default=22, nullable=False)

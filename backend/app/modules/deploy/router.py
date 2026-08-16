@@ -99,12 +99,15 @@ async def delete_environment(project_id: UUID, environment_id: UUID, db: AsyncSe
 
 
 @router.get("/tasks", response_model=dict)
-async def list_tasks(project_id: UUID, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
+async def list_tasks(project_id: UUID, page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)) -> Dict[str, Any]:
     env_ids = [e.id for e in (await db.scalars(select(dm.Environment).where(dm.Environment.project_id == project_id))).all()]
     if not env_ids:
-        return {"items": [], "meta": {"total": 0}}
-    rows = (await db.scalars(select(dm.DeployTask).where(dm.DeployTask.environment_id.in_(env_ids)))).all()
-    return {"items": [{"id": t.id, "environment_id": t.environment_id, "status": t.status} for t in rows], "meta": {"total": len(rows)}}
+        return {"items": [], "meta": {"page": max(page, 1), "page_size": min(max(page_size, 1), 100), "total": 0}}
+    normalized_page, normalized_page_size = normalize_pagination(page, page_size)
+    stmt = select(dm.DeployTask).where(dm.DeployTask.environment_id.in_(env_ids))
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = (await db.scalars(stmt.order_by(dm.DeployTask.started_at.desc()).offset((normalized_page - 1) * normalized_page_size).limit(normalized_page_size))).all()
+    return {"items": [{"id": t.id, "environment_id": t.environment_id, "status": t.status} for t in rows], "meta": {"page": normalized_page, "page_size": normalized_page_size, "total": total}}
 
 
 @router.get("/tasks/{task_id}")
@@ -132,7 +135,7 @@ async def cancel_task(project_id: UUID, task_id: UUID, db: AsyncSession = Depend
 @router.post("/credentials", status_code=status.HTTP_201_CREATED)
 async def create_credential(project_id: UUID, payload: SshCredentialCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
     await require_project_owner(project_id, user, db)
-    credential = dm.SshCredential(name=payload.name, host=payload.host, port=payload.port, username=payload.username, private_key_encrypted=payload.credential_ref)
+    credential = dm.SshCredential(project_id=project_id, name=payload.name, host=payload.host, port=payload.port, username=payload.username, private_key_encrypted=payload.credential_ref)
     db.add(credential)
     await db.commit()
     await db.refresh(credential)
@@ -142,7 +145,7 @@ async def create_credential(project_id: UUID, payload: SshCredentialCreate, db: 
 @router.delete("/credentials/{credential_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_credential(project_id: UUID, credential_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
     await require_project_owner(project_id, user, db)
-    credential = await db.get(dm.SshCredential, credential_id)
+    credential = await db.scalar(select(dm.SshCredential).where(dm.SshCredential.id == credential_id, dm.SshCredential.project_id == project_id))
     if credential is None:
         raise NotFoundError("Credential not found")
     await db.delete(credential)

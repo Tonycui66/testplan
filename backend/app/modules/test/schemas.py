@@ -32,8 +32,8 @@ class SuiteUpdate(BaseModel):
 
 class CaseUpdate(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=500)
-    steps: Optional[str] = None
-    expected: Optional[str] = None
+    steps: Optional[str] = Field(default=None, min_length=1)
+    expected: Optional[str] = Field(default=None, min_length=1)
     priority: Optional[Literal["low", "medium", "high", "critical"]] = None
     type: Optional[Literal["manual", "api", "e2e"]] = None
 

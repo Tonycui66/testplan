@@ -73,3 +73,10 @@ def test_phase3_execution_routes_exist() -> None:
         "/api/v1/projects/{project_id}/artifacts/repositories/{repository_id}/artifacts",
     ]:
         assert path in paths
+
+from app.modules.test.schemas import CaseUpdate
+
+
+def test_case_update_rejects_null_steps_or_expected() -> None:
+    with pytest.raises(ValidationError):
+        CaseUpdate(steps="", expected="")
