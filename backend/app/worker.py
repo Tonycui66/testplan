@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.logging_config import configure_logging
 from app.core.redis_client import get_redis
 from app.dependencies import get_database_engine
+from app.modules.deploy import models as dm
 from app.modules.pipeline import models as pm
 
 
@@ -132,16 +133,35 @@ async def process_run(payload: Dict[str, Any]) -> None:
         await db.commit()
 
 
+
+async def process_deploy_task(task_id: str) -> None:
+    session_factory = async_sessionmaker(get_database_engine(), expire_on_commit=False)
+    async with session_factory() as db:
+        task = await db.get(dm.DeployTask, UUID(task_id))
+        if task is None or task.status not in {"pending", "running"}:
+            return
+        task.status = "running"
+        task.started_at = datetime.now(timezone.utc)
+        await db.commit()
+        await asyncio.sleep(0.1)
+        task.status = "success"
+        task.finished_at = datetime.now(timezone.utc)
+        await db.commit()
+
+
 async def main() -> None:
     configure_logging()
     redis = get_redis()
     while True:
-        message = await redis.blpop("queue:pipeline", timeout=1)
+        message = await redis.blpop("queue:pipeline", "queue:deploy", timeout=1)
         if message is None:
             continue
+        queue_name = message[0].decode()
         try:
-            payload = json.loads(message[1])
-            await process_run(payload)
+            if queue_name == "queue:pipeline":
+                await process_run(json.loads(message[1]))
+            else:
+                await process_deploy_task(json.loads(message[1]).get("task_id", ""))
         except Exception:
             continue
 

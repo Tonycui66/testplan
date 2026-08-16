@@ -63,3 +63,13 @@ def test_artifact_rejects_dot_segments() -> None:
         ArtifactCreate(name="..", version="x", size_bytes=1)
     with pytest.raises(ValidationError):
         ArtifactCreate(name="app", version="..", size_bytes=1)
+
+
+def test_phase3_execution_routes_exist() -> None:
+    paths = {route.path for route in app.routes}
+    for path in [
+        "/api/v1/projects/{project_id}/tests/runs",
+        "/api/v1/projects/{project_id}/deploy/tasks",
+        "/api/v1/projects/{project_id}/artifacts/repositories/{repository_id}/artifacts",
+    ]:
+        assert path in paths

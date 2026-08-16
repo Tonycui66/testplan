@@ -30,3 +30,15 @@ class DeployTaskCreate(BaseModel):
     branch: Optional[str] = Field(default=None, max_length=255)
     commit_sha: Optional[str] = Field(default=None, max_length=40)
     strategy: Literal["rolling", "blue_green", "canary"] = "rolling"
+
+class EnvironmentUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    is_protected: Optional[bool] = None
+
+
+class SshCredentialCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    host: str = Field(min_length=1, max_length=255)
+    port: int = Field(default=22, ge=1, le=65535)
+    username: str = Field(min_length=1, max_length=100)
+    credential_ref: str = Field(min_length=1, max_length=200)

@@ -24,3 +24,26 @@ class PlanCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     iteration_id: Optional[UUID] = None
     case_ids: List[UUID] = []
+
+class SuiteUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=2000)
+
+
+class CaseUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    steps: Optional[str] = None
+    expected: Optional[str] = None
+    priority: Optional[Literal["low", "medium", "high", "critical"]] = None
+    type: Optional[Literal["manual", "api", "e2e"]] = None
+
+
+class RunCreate(BaseModel):
+    plan_id: UUID
+    environment_id: Optional[UUID] = None
+
+
+class ResultCreate(BaseModel):
+    case_id: UUID
+    status: Literal["pending", "pass", "fail", "skip", "blocked"] = "pass"
+    comment: Optional[str] = None
