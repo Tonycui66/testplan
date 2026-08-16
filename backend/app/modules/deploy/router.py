@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Dict
 from uuid import UUID
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from app.core.pagination import normalize_pagination
 from app.core.exceptions import NotFoundError
@@ -10,7 +10,7 @@ from app.modules.artifact import models as artifact_models
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_current_user, get_db, require_project_access
 from app.modules.deploy import models as dm
-from app.modules.deploy.schemas import DeployTaskCreate, EnvironmentCreate
+from app.modules.deploy.schemas import DeployTaskCreate, EnvironmentCreate, K8sConfig, SshConfig
 from app.modules.user.models import User
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/deploy", tags=["deploy"], dependencies=[Depends(require_project_access)])
@@ -24,7 +24,15 @@ async def require_project_owner(project_id: UUID, user: User, db: AsyncSession) 
 @router.post("/environments", status_code=status.HTTP_201_CREATED)
 async def create_environment(project_id: UUID, payload: EnvironmentCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> Dict[str, Any]:
     await require_project_owner(project_id, user, db)
-    env = dm.Environment(project_id=project_id, **payload.model_dump())
+    data = payload.model_dump()
+    if payload.config is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Environment config is required")
+    if payload.type == "ssh" and not isinstance(payload.config, SshConfig):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="SSH config required")
+    if payload.type == "k8s" and not isinstance(payload.config, K8sConfig):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="K8s config required")
+    data["config"] = payload.config.model_dump()
+    env = dm.Environment(project_id=project_id, **data)
     db.add(env)
     await db.commit()
     await db.refresh(env)

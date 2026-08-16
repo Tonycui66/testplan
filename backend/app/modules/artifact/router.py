@@ -36,9 +36,7 @@ async def upload_artifact(project_id: UUID, repository_id: UUID, payload: Artifa
         raise NotFoundError("Artifact repository not found")
     data = payload.model_dump()
     metadata = data.pop("metadata", {})
-    storage_path = data.pop("storage_path", None)
-    if not storage_path:
-        storage_path = f"{project_id}/{repository_id}/{data['name']}/{data['version']}"
+    storage_path = f"{project_id}/{repository_id}/{data['name']}/{data['version']}"
     artifact = am.Artifact(repository_id=repository_id, storage_path=storage_path, artifact_metadata=metadata, **data)
     db.add(artifact)
     await db.commit()

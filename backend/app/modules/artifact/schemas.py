@@ -11,9 +11,8 @@ class RepositoryCreate(BaseModel):
 
 
 class ArtifactCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    version: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9._-]+$")
+    version: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9._-]+$")
     size_bytes: int = Field(ge=0)
-    storage_path: Optional[str] = Field(default=None, max_length=500)
     checksum: Optional[str] = Field(default=None, pattern=r"^[a-fA-F0-9]{1,64}$")
     metadata: Dict[str, Any] = {}

@@ -38,3 +38,19 @@ def test_deploy_and_test_enum_validation() -> None:
         EnvironmentCreate(name="env", type="invalid")
     with pytest.raises(ValidationError):
         CaseCreate(suite_id="00000000-0000-0000-0000-000000000000", title="x", steps="s", expected="e", priority="urgent")
+
+from app.modules.deploy.schemas import K8sConfig, SshConfig
+
+
+def test_artifact_name_and_version_reject_path_traversal() -> None:
+    with pytest.raises(ValidationError):
+        ArtifactCreate(name="../../etc", version="passwd", size_bytes=1)
+    with pytest.raises(ValidationError):
+        ArtifactCreate(name="app", version="../bad", size_bytes=1)
+
+
+def test_deploy_config_requires_typed_credential_ref() -> None:
+    ssh = SshConfig(host="example.com", username="deploy", credential_ref="cred-1")
+    assert ssh.credential_ref == "cred-1"
+    k8s = K8sConfig(cluster_ref="cluster-a", credential_ref="cred-2")
+    assert k8s.namespace is None
